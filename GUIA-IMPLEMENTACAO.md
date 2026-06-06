@@ -4,6 +4,13 @@
 **Base acadêmica:** `descricoes-parte-escrita/tcc-latex/` (PGC1 entregue)  
 **Status:** plano — **nenhuma implementação nesta fase**
 
+**Documentos complementares:**
+
+| Arquivo | Conteúdo |
+|---------|----------|
+| `GUIA-EXECUCAO-WSL.md` | Setup e execução local no WSL (Fase 0) |
+| `PLANO-TESTES-VALIDACAO.md` | Testes, critérios de aceite e marco E2E-Q2 por fase |
+
 ---
 
 ## 1. Objetivo da extensão
@@ -80,7 +87,7 @@ pip install -r requirements.txt
 | Tesseract | `sudo apt install tesseract-ocr tesseract-ocr-por` | `brew install tesseract tesseract-lang` | Instalar Tesseract + pacote `por` via installer; usar **WSL** para MakeTests |
 | LaTeX | `texlive-full` ou subset mínimo | MacTeX | MiKTeX / TeX Live + WSL para execução |
 
-**Observação:** até remover ou contornar o bloqueio `win32`, desenvolvimento e correção devem ocorrer em **Linux ou WSL**.
+**Observação:** até remover ou contornar o bloqueio `win32`, desenvolvimento e correção devem ocorrer em **Linux ou WSL**. Passo a passo: **`GUIA-EXECUCAO-WSL.md`**. Critérios de pronto: **`PLANO-TESTES-VALIDACAO.md`** (Fase 0, T0.1–T0.4).
 
 ---
 
@@ -105,6 +112,8 @@ pip install -r requirements.txt
 | `getAnswerText()` | Gabarito discursivo / rubrica resumida para `Template.pdf` |
 
 **Entregável:** questão exemplo corrigível end-to-end com OCR+LLM mock (antes da API real).
+
+**Validação:** testes T1.1–T1.7 em `PLANO-TESTES-VALIDACAO.md`.
 
 ---
 
@@ -341,7 +350,7 @@ Fase 7  Experimento CER/WER (paralelo possível após Fase 2)
 
 ## 6. Checklist de pré-requisitos antes de codificar
 
-- [ ] Ambiente Linux ou WSL funcional
+- [ ] Ambiente WSL funcional (`GUIA-EXECUCAO-WSL.md` §6 — T0.1–T0.4)
 - [ ] `MakeTests.py` gera e corrige questão objetiva de exemplo
 - [ ] Tesseract com `por` instalado (`tesseract --list-langs`)
 - [ ] Conta e API key do provedor LLM escolhido
@@ -355,6 +364,8 @@ Fase 7  Experimento CER/WER (paralelo possível após Fase 2)
 
 | Documento | Caminho |
 |-----------|---------|
+| Execução local WSL | `GUIA-EXECUCAO-WSL.md` |
+| Testes e marco E2E-Q2 | `PLANO-TESTES-VALIDACAO.md` |
 | TCC PGC1 (canônico) | `../descricoes-parte-escrita/tcc-latex/` |
 | Análise técnica MakeTests | `../descricoes-parte-escrita/02-engenharia/analise-maketests-dissertativas.md` |
 | Checklist Q2 | `../descricoes-parte-escrita/01-apoio-pgc/checklist-q2.md` |
