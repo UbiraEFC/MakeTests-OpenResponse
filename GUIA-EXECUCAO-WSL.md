@@ -35,7 +35,7 @@ sudo apt install -y \
   tesseract-ocr tesseract-ocr-por \
   texlive-latex-base texlive-latex-extra texlive-fonts-recommended \
   texlive-lang-portuguese \
-  ghostscript poppler-utils \
+  ghostscript poppler-utils imagemagick \
   git
 ```
 
@@ -43,8 +43,15 @@ sudo apt install -y \
 |--------|------------------|
 | `libzbar0` | Leitura de QR Code e códigos de barras |
 | `tesseract-ocr` + `por` | OCR (`QuestionOCR` e extensão dissertativa) |
-| `texlive-*` | Compilação LaTeX → PDF das provas |
+| `texlive-*` (inclui `texlive-latex-extra`, que traz `enumitem.sty`) | Compilação LaTeX → PDF das provas |
 | `ghostscript` / `poppler-utils` | Conversão/manipulação de PDF quando necessário |
+| `imagemagick` | Usado por `convertPdfText2PdfImage.sh` (rasterizar PDF "digital" em imagens para testar correção) |
+
+**Importante — política do ImageMagick:** por padrão, o Ubuntu desabilita o coder de PDF do ImageMagick (mitigação a CVEs antigas do Ghostscript). Sem isso, `convertPdfText2PdfImage.sh` falha com `not authorized 'PDF'`. Para habilitar em ambiente de dev local (não exposto a PDFs de terceiros não confiáveis):
+
+```bash
+sudo sed -i 's/<policy domain="coder" rights="none" pattern="PDF" \/>/<policy domain="coder" rights="read|write" pattern="PDF" \/>/' /etc/ImageMagick-6/policy.xml
+```
 
 **Verificações:**
 
@@ -96,6 +103,8 @@ python3 -c "import cv2, pyzbar, pytesseract, qrcode; print('OK')"
 ```
 
 Se falhar, reinstale o pacote indicado ou a lib do sistema correspondente.
+
+**Alternativa automatizada (opcional):** se você tiver um `setup-wsl.sh` local fora deste repositório (script de bootstrap pessoal), ele pode automatizar os passos 1–4 acima. Não faz parte deste repositório.
 
 ---
 
@@ -178,7 +187,9 @@ No WSL, webcam exige **WSLg** (Windows 11) ou configuração USB (`usbipd`). Se 
 
 ## 6. Checklist Fase 0 (critério de pronto)
 
-Execute na ordem e marque em `PLANO-TESTES-VALIDACAO.md`:
+**Atalho:** `bash validate-maketests.sh` (dentro de `MakeTests/`) roda T0.1–T0.5 de ponta a ponta usando a fixture `test-quick/` e imprime PASS/FAIL de cada item — é o jeito mais rápido de revalidar o ambiente após qualquer mudança.
+
+Para checar manualmente item a item, execute na ordem e marque em `PLANO-TESTES-VALIDACAO.md`:
 
 | # | Comando / verificação | OK? |
 |---|------------------------|-----|

@@ -240,9 +240,9 @@ class Utils:
 					elif objs[obj]['/Filter'] == '/FlateDecode':
 						size = (objs[obj]['/Width'],objs[obj]['/Height'])
 						mode = "RGB" if objs[obj]['/ColorSpace'] == '/DeviceRGB' else "P"
-						img = Image.frombytes(mode, size, objs[obj].getData())
+						img = Image.frombytes(mode, size, objs[obj].get_data())
 						yield ImageUtils.pil2opencv(img)
-					elif type(objs[obj]['/Filter']) is PyPDF2.generic.ArrayObject:
+					elif type(objs[obj]['/Filter']) is pypdf.generic.ArrayObject:
 						for f in objs[obj]['/Filter']:
 							if f == '/DCTDecode':
 								yield cv2.imdecode(np.frombuffer(objs[obj]._data, np.uint8), cv2.IMREAD_COLOR)
@@ -255,8 +255,12 @@ class Utils:
 	def getEncodeFile(filename):
 		import chardet
 		with open(filename, 'rb') as file:
-			raw = file.read(32)
-		return chardet.detect(raw)['encoding']
+			raw = file.read()
+		try:
+			raw.decode('utf-8')
+			return 'utf-8'
+		except UnicodeDecodeError:
+			return chardet.detect(raw)['encoding']
 
 	@staticmethod
 	def getTimestamp(number_only = False):
@@ -1378,6 +1382,58 @@ class QuestionOCR(Question):
 
 
 
+#############################
+# BEGIN QUESTION DISSERTATIVE #
+class QuestionDissertative(Question):
+	# Score mockado (sem OCR/LLM real ainda - Fases 2-4). Quando o grader real
+	# existir, trocar por chamada a maketests_ext/llm_grader.py, com fallback
+	# para este mock se os.environ.get("MOCK_GRADER") estiver setado.
+	MOCK_SCORE = 50
+	lines      = 10  # quantidade de linhas pautadas na área de resposta
+
+	statement = None
+	rubric    = None
+
+	def makeSetup(self):
+		raise Exception("Method not implemented.")
+
+	def makeVariables(self):
+		self.makeSetup()
+
+	def answerAreaAspectRate(self):
+		return 6/1
+
+	def drawAnswerArea(self, img):
+		height, width, _ = img.shape
+		cv2.rectangle(img, (0,0), (width-1,height-1), (0,0,0), thickness=2, lineType=cv2.LINE_AA)
+		margin = int(height*0.1)
+		usable_height = height - 2*margin
+		for l in range(1, self.lines+1):
+			y = margin + int(usable_height*l/(self.lines+1))
+			cv2.line(img, (margin, y), (width-margin, y), (0,0,0), thickness=1, lineType=cv2.LINE_AA)
+		return img
+
+	def doCorrection(self, img):
+		import numpy as np
+		score = self.MOCK_SCORE
+
+		imgInfo = np.zeros((60, img.shape[1], 3), np.uint8)
+		imgInfo[:,:] = (255,255,255)
+		ImageUtils.drawTextInsideTheBox(imgInfo, "Mock score (sem OCR/LLM ainda): {}".format(score))
+		feedback = np.vstack((imgInfo, img))
+
+		return score, img, feedback
+
+	def getQuestionTex(self, desc):
+		return self.statement
+
+	def getAnswerText(self, LaTeX=True):
+		return "Rubrica: " + self.rubric
+# END QUESTION DISSERTATIVE #
+##############################
+
+
+
 #####################
 # BEGIN QUESTIONSDB #
 class QuestionsDB:
@@ -2489,6 +2545,13 @@ class EssayQuestion(QuestionEssay):
 
 	def getAnswerText(self,LaTeX):
 		return ""
+"""
+, 'dissertative': r"""
+from MakeTests import QuestionDissertative
+class MyQuestionDissertative(QuestionDissertative):
+	def makeSetup(self):
+		self.statement = "Explique, em suas palavras, o que e fotossintese e qual sua importancia para os seres vivos."
+		self.rubric    = "Deve citar: (1) conversao de luz solar em energia quimica; (2) papel da clorofila/cloroplastos; (3) liberacao de oxigenio como subproduto."
 """
 , 'choices': r"""
 from MakeTests import QuestionMultipleChoice

@@ -7,6 +7,17 @@ Cada fase possui **entregável**, **testes**, **critérios de aceite** e **evid�
 
 ---
 
+## Processo: como fechar uma fase
+
+1. Implementar o entregável da fase (ver `GUIA-IMPLEMENTACAO.md`).
+2. Abrir `validate-maketests.sh` (dentro de `MakeTests/`) e escrever o corpo de `validate_faseN()` correspondente, substituindo o placeholder "ainda não implementada" pelos testes TN.x reais da fase (tabela de cada fase abaixo).
+3. Rodar `bash validate-maketests.sh` e confirmar que **nada falhou** — inclusive as fases anteriores, que devem continuar verdes (é a garantia de não-regressão).
+4. Só então preencher a linha da fase na tabela **Registro de progresso** (data, testes OK, evidência).
+
+Ou seja: `validate-maketests.sh` cresce junto com a implementação — é o snapshot vivo de "o que já está garantido funcionar", e o Registro de Progresso é o histórico textual de quando e com que evidência cada fase foi fechada.
+
+---
+
 ## Marco do núcleo (entrega Q2)
 
 Ao concluir a **Fase 6**, o núcleo do TCC deve demonstrar:
@@ -336,6 +347,8 @@ pytest tests/unit -q
 pytest tests/integration -q --run-ocr   # flag para testes lentos
 ```
 
+Quando `tests/` existir, a função `validate_faseN()` correspondente em `validate-maketests.sh` deve **chamar o pytest da fase** (em vez de duplicar lógica em bash) — `validate-maketests.sh` é o orquestrador único que tanto roda checks de ambiente/E2E em shell quanto invoca os testes unitários/integração em pytest, fase a fase.
+
 ---
 
 ## Registro de progresso
@@ -344,8 +357,8 @@ Copie e preencha ao concluir cada fase:
 
 | Fase | Data | Responsável | Testes OK | Evidência (link/arquivo) |
 |------|------|-------------|-----------|--------------------------|
-| 0 | | | T0.1–T0.4 | |
-| 1 | | | T1.1–T1.7 | |
+| 0 | 2026-06-17 | Bira | T0.1–T0.5 | `bash validate-maketests.sh` (raiz) — 5/5 OK. Ambiente: Python 3.10.12, Tesseract 4.1.1 (pacote `por` instalado em 2026-06-17, faltava antes), ZBar 0.23.92, pdfTeX (TeX Live 2022), ImageMagick (policy PDF habilitada). Corrigidos no caminho: `tex.preamble` sem `enumitem`/`multicol`/`graphicx`; chave `tex.template` deveria ser `tex.answer_key`; encoding de CSV (`Utils.getEncodeFile` lia só 32 bytes); `Utils.getImagesFromPDF` usava API removida do PyPDF2 (`getData`→`get_data`, `PyPDF2.generic`→`pypdf.generic`); `correction.final_calc` precisa ser lista de linhas com `final_calc = lambda ...` (não string solta); `convertPdfText2PdfImage.sh` tinha CRLF. |
+| 1 | 2026-06-17 | Bira | T1.1–T1.7 | `bash validate-maketests.sh` (raiz) — 12/12 OK (T0+T1). Implementado: classe `QuestionDissertative(Question)` em `MakeTests.py` (herança direta de `Question`, não `QuestionMatrix`, conforme decisão arquitetural); `drawAnswerArea` desenha retângulo + linhas pautadas via cv2 (sem matriz de círculos); `doCorrection` mockado (`MOCK_SCORE=50`, sem OCR/LLM real — isso é Fases 2-4); template `-e dissertative` adicionado ao dict `examples`. Fixture `test-quick/` estendida com `Questions/Hard/dissertative_example.py` + segunda entrada em `config.json.questions.select`, provando que objetiva (Q_1) e dissertativa (Q_2) coexistem na mesma prova/correção sem regressão. |
 | 2 | | | T2.1–T2.5 | |
 | 3 | | | T3.1–T3.5 | |
 | 4 | | | T4.1–T4.5 | |
