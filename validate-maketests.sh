@@ -205,7 +205,95 @@ validate_fase2() {
         skip "T2.x" "maketests_ext/ocr_extract.py ainda não existe"
         return
     fi
-    skip "T2.x" "ocr_extract.py existe, mas validate_fase2() ainda não foi escrita"
+
+    (cd "$MAKETESTS_DIR" && python3 - <<'PYEOF'
+import cv2, numpy as np
+from maketests_ext.ocr_extract import extract_text
+from MakeTests import QuestionDissertative, ImageUtils
+
+# T2.1 — imagem vazia, sem crash
+blank = np.full((50, 200, 3), 255, np.uint8)
+r = extract_text(blank)
+print("T2.1", "OK" if r["text"] == "" else "FAIL text={!r}".format(r["text"]))
+
+def levenshtein(a, b):
+    if len(a) < len(b):
+        a, b = b, a
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
+        prev = cur
+    return prev[-1]
+
+def cer(expected, obtained):
+    return (levenshtein(expected, obtained) / len(expected)) if expected else 0.0
+
+# T2.2 — texto impresso sintetico, CER < 15%
+img = cv2.imread("tests/fixtures/ocr/printed_pt_01.png")
+expected = open("tests/fixtures/ocr/printed_pt_01.txt").read().strip()
+c = cer(expected, extract_text(img)["text"])
+print("T2.2", "OK" if c < 0.15 else "FAIL cer={:.3f}".format(c))
+
+# T2.3 — "manuscrito" letra de forma sintetico, exploratorio (sem crash)
+img = cv2.imread("tests/fixtures/ocr/forma_pt_01.png")
+expected = open("tests/fixtures/ocr/forma_pt_01.txt").read().strip()
+c = cer(expected, extract_text(img)["text"])
+print("T2.3", "OK cer={:.3f}".format(c))
+
+# T2.4 — integracao com QuestionDissertative.doCorrection
+class T(QuestionDissertative):
+    def makeSetup(self):
+        self.statement = "Explique X."
+        self.rubric = "Y"
+
+captured = []
+original = ImageUtils.drawTextInsideTheBox
+def spy(img, text, *a, **kw):
+    captured.append(text)
+    return original(img, text, *a, **kw)
+ImageUtils.drawTextInsideTheBox = spy
+try:
+    t = T(); t.makeVariables()
+    img = cv2.imread("tests/fixtures/ocr/printed_pt_01.png")
+    score, img_proc, feedback = t.doCorrection(img)
+finally:
+    ImageUtils.drawTextInsideTheBox = original
+
+ok = isinstance(score, (int, float)) and any("OCR:" in c and "fotoss" in c.lower() for c in captured)
+print("T2.4", "OK" if ok else "FAIL captured={}".format(captured))
+PYEOF
+    ) > /tmp/validate_fase2_unit.log 2>&1
+
+    grep -q "^T2.1 OK" /tmp/validate_fase2_unit.log; check "T2.1" "Imagem vazia: extract_text sem crash, texto vazio" $?
+    grep -q "^T2.2 OK" /tmp/validate_fase2_unit.log; check "T2.2" "Texto impresso sintético: CER < 15%" $?
+    grep -q "^T2.3 OK" /tmp/validate_fase2_unit.log; check "T2.3" "'Manuscrito' letra de forma sintético (exploratório)" $?
+    grep -q "^T2.4 OK" /tmp/validate_fase2_unit.log; check "T2.4" "doCorrection inclui texto OCR no feedback" $?
+
+    # T2.5 — regressão: erro claro se o binário tesseract não estiver no PATH
+    if command -v tesseract > /dev/null 2>&1; then
+        clean_path=""
+        IFS=':' read -ra path_dirs <<< "$PATH"
+        for d in "${path_dirs[@]}"; do
+            if [ ! -x "$d/tesseract" ]; then
+                clean_path="${clean_path:+$clean_path:}$d"
+            fi
+        done
+        (cd "$MAKETESTS_DIR" && PATH="$clean_path" python3 -c "
+import numpy as np
+from maketests_ext.ocr_extract import extract_text
+try:
+    extract_text(np.full((50,200,3), 255, dtype='uint8'))
+    print('T2.5 FAIL: nao levantou excecao sem tesseract no PATH')
+except Exception as e:
+    print('T2.5 OK', type(e).__name__)
+" > /tmp/validate_fase2_t25.log 2>&1)
+        grep -q "^T2.5 OK" /tmp/validate_fase2_t25.log
+        check "T2.5" "Erro claro quando tesseract não está no PATH" $?
+    else
+        skip "T2.5" "tesseract não encontrado no PATH atual; não foi possível testar a regressão"
+    fi
 }
 
 ################################################################################

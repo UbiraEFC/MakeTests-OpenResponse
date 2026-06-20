@@ -1417,9 +1417,17 @@ class QuestionDissertative(Question):
 		import numpy as np
 		score = self.MOCK_SCORE
 
-		imgInfo = np.zeros((60, img.shape[1], 3), np.uint8)
+		# Fase 2: extração OCR já está plugada; a nota ainda é mockada (Fase 4/LLM não existe ainda).
+		try:
+			from maketests_ext.ocr_extract import extract_text
+			ocr_text = extract_text(img)["text"]
+		except Exception as e:
+			ocr_text = "(OCR indisponível: {})".format(e)
+
+		imgInfo = np.zeros((80, img.shape[1], 3), np.uint8)
 		imgInfo[:,:] = (255,255,255)
-		ImageUtils.drawTextInsideTheBox(imgInfo, "Mock score (sem OCR/LLM ainda): {}".format(score))
+		ImageUtils.drawTextInsideTheBox(imgInfo[0:40,:], "OCR: {}".format(ocr_text))
+		ImageUtils.drawTextInsideTheBox(imgInfo[40:80,:], "Mock score (sem LLM ainda): {}".format(score))
 		feedback = np.vstack((imgInfo, img))
 
 		return score, img, feedback
