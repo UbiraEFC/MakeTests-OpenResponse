@@ -261,7 +261,7 @@ try:
 finally:
     ImageUtils.drawTextInsideTheBox = original
 
-ok = isinstance(score, (int, float)) and any("OCR:" in c and "fotoss" in c.lower() for c in captured)
+ok = isinstance(score, (int, float)) and any("OCR" in c and "fotoss" in c.lower() for c in captured)
 print("T2.4", "OK" if ok else "FAIL captured={}".format(captured))
 PYEOF
     ) > /tmp/validate_fase2_unit.log 2>&1
@@ -304,7 +304,58 @@ validate_fase3() {
         skip "T3.x" "maketests_ext/text_normalize.py ainda não existe"
         return
     fi
-    skip "T3.x" "text_normalize.py existe, mas validate_fase3() ainda não foi escrita"
+
+    (cd "$MAKETESTS_DIR" && python3 - <<'PYEOF'
+import cv2
+from maketests_ext.text_normalize import normalize
+from maketests_ext.ocr_extract import extract_text
+from MakeTests import QuestionDissertative, ImageUtils
+
+# T3.1 — espacos duplos
+print("T3.1", "OK" if normalize("foo  bar") == "foo bar" else "FAIL")
+
+# T3.2 — hifenizacao de fim de linha
+print("T3.2", "OK" if normalize("exem-\nplo") == "exemplo" else "FAIL")
+
+# T3.3 — normalizacao NFKC (ligature fi -> f+i)
+print("T3.3", "OK" if normalize("A ﬁgura") == "A figura" else "FAIL")
+
+# T3.4 — doCorrection preserva raw e normalizado, ambos visiveis
+class T(QuestionDissertative):
+    def makeSetup(self):
+        self.statement = "Explique X."
+        self.rubric = "Y"
+
+captured = []
+original = ImageUtils.drawTextInsideTheBox
+def spy(img, text, *a, **kw):
+    captured.append(text)
+    return original(img, text, *a, **kw)
+ImageUtils.drawTextInsideTheBox = spy
+try:
+    t = T(); t.makeVariables()
+    img = cv2.imread("tests/fixtures/ocr/printed_pt_01.png")
+    t.doCorrection(img)
+finally:
+    ImageUtils.drawTextInsideTheBox = original
+
+has_raw = any(c.startswith("OCR (raw):") for c in captured)
+has_norm = any(c.startswith("Normalizado:") for c in captured)
+print("T3.4", "OK" if has_raw and has_norm else "FAIL captured={}".format(captured))
+
+# T3.5 — pipeline OCR -> normalize, sem excecao, resultado estavel
+img = cv2.imread("tests/fixtures/ocr/printed_pt_01.png")
+r1 = normalize(extract_text(img)["text"])
+r2 = normalize(extract_text(img)["text"])
+print("T3.5", "OK" if r1 and r1 == r2 else "FAIL r1={!r} r2={!r}".format(r1, r2))
+PYEOF
+    ) > /tmp/validate_fase3_unit.log 2>&1
+
+    grep -q "^T3.1 OK" /tmp/validate_fase3_unit.log; check "T3.1" "Espaços duplos -> espaço único" $?
+    grep -q "^T3.2 OK" /tmp/validate_fase3_unit.log; check "T3.2" "Hifenização de fim de linha removida" $?
+    grep -q "^T3.3 OK" /tmp/validate_fase3_unit.log; check "T3.3" "Normalização Unicode NFKC" $?
+    grep -q "^T3.4 OK" /tmp/validate_fase3_unit.log; check "T3.4" "doCorrection mantém raw e normalizado visíveis" $?
+    grep -q "^T3.5 OK" /tmp/validate_fase3_unit.log; check "T3.5" "Pipeline OCR->normalize estável, sem exceção" $?
 }
 
 ################################################################################
