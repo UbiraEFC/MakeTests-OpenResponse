@@ -1,19 +1,21 @@
 def extract_text(image_bgr):
     """Extrai texto de uma imagem BGR (recorte da área de resposta) via Tesseract.
 
-    Reaproveita o pré-processamento de QuestionOCR.doCorrection (MakeTests.py).
+    O pré-processamento de QuestionOCR.doCorrection (blur+threshold+morphology)
+    foi desenhado para reforçar marcas/bolhas grossas, não texto fino — testado
+    contra uma área de resposta real (com as linhas pautadas de
+    QuestionDissertative.drawAnswerArea), ele destrói completamente a
+    legibilidade do texto. Sem pré-processamento, com --psm 6 (bloco de texto
+    uniforme, suporta múltiplas linhas), funciona bem tanto nas fixtures
+    golden quanto numa área pautada real.
     """
     import cv2
     import pytesseract
     from pytesseract import Output
 
     img_gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
-    img_gray = cv2.medianBlur(img_gray, 5)
-    img_gray = cv2.GaussianBlur(img_gray, (7, 7), 0)
-    img_gray = cv2.adaptiveThreshold(img_gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 9, C=2)
-    img_gray = cv2.morphologyEx(img_gray, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
 
-    data = pytesseract.image_to_data(img_gray, lang="por", output_type=Output.DICT)
+    data = pytesseract.image_to_data(img_gray, lang="por", config="--psm 6", output_type=Output.DICT)
 
     words = []
     confs = []

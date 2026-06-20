@@ -60,6 +60,7 @@ Ao concluir a **Fase 6**, o núcleo do TCC deve demonstrar:
 | T0.3 | ZBar | `./MakeTests.py -v` (geração) | QR/códigos na prova gerada |
 | T0.4 | LaTeX | `./MakeTests.py -v` | `Tests.pdf` criado |
 | T0.5 | Correção baseline | `./MakeTests.py -v -p <pdf_objetiva>` | `Correction/_scores.csv` atualizado |
+| T0.6 | Correção end-to-end com resposta **real** | `tests/test_synthetic_answers.py` (pinta a bolha certa na imagem real, recompila, rasteriza, corrige) | 2 alunos com bolha certa → 100; 1 em branco → 0 |
 
 ### Evidência
 
@@ -92,6 +93,7 @@ Não iniciar Fase 1 sem T0.1–T0.4 verdes.
 | T1.5 | Geração PDF | Integração | Prova inclui questão dissertativa com linhas em branco |
 | T1.6 | `doCorrection` mock | Unitário | Retorna 3 valores; score numérico 0–100 |
 | T1.7 | Regressão tipos existentes | Smoke | `./MakeTests.py -v` com config só objetivas ainda funciona |
+| T1.8 | Correção end-to-end com resposta **real** (não em branco) | `tests/test_synthetic_answers.py` (escreve frase com fonte handwriting na área pautada real, recompila, rasteriza, corrige) | OCR extrai texto não-trivial para quem escreveu; vazio para quem deixou em branco |
 
 ### Mock obrigatório nesta fase
 
@@ -361,6 +363,7 @@ Copie e preencha ao concluir cada fase:
 | 1 | 2026-06-17 | Bira | T1.1–T1.7 | `bash validate-maketests.sh` (raiz) — 12/12 OK (T0+T1). Implementado: classe `QuestionDissertative(Question)` em `MakeTests.py` (herança direta de `Question`, não `QuestionMatrix`, conforme decisão arquitetural); `drawAnswerArea` desenha retângulo + linhas pautadas via cv2 (sem matriz de círculos); `doCorrection` mockado (`MOCK_SCORE=50`, sem OCR/LLM real — isso é Fases 2-4); template `-e dissertative` adicionado ao dict `examples`. Fixture `test-quick/` estendida com `Questions/Hard/dissertative_example.py` + segunda entrada em `config.json.questions.select`, provando que objetiva (Q_1) e dissertativa (Q_2) coexistem na mesma prova/correção sem regressão. |
 | 2 | 2026-06-20 | Bira | T2.1–T2.5 | `bash validate-maketests.sh` — 17/17 OK (T0+T1+T2). Implementado: `maketests_ext/ocr_extract.py` (`extract_text`, reaproveita o pré-processamento de `QuestionOCR.doCorrection`; usa `pytesseract.image_to_data` para `confidence_mean`/`char_doubt_ratio` por palavra). Corpus golden sintético em `tests/fixtures/ocr/` (texto impresso DejaVu Sans + "manuscrito letra de forma" com a fonte Patrick Hand, OFL, vendorizada): CER ≈3.6% no impresso, ≈1.8% no manuscrito sintético — ambos bem abaixo do limiar de 15%. `QuestionDissertative.doCorrection` agora chama `extract_text` e mostra o texto extraído no feedback; a nota continua mockada (LLM é Fase 4). Só Tesseract nesta fase (TrOCR/Cloud ficam para avaliação futura, Fase 7). |
 | 3 | 2026-06-20 | Bira | T3.1–T3.5 | `bash validate-maketests.sh` — 22/22 OK (T0+T1+T2+T3). Implementado: `maketests_ext/text_normalize.py` (`normalize`: NFKC → hifenização de fim de linha → quebras de linha espúrias → espaços duplicados → strip; só stdlib, sem `ftfy`). `QuestionDissertative.doCorrection` agora mostra OCR raw + normalizado no feedback (preservação dos dois textos sem sidecar formal, que é entregável da Fase 6). Pego no caminho: a mudança do prefixo "OCR:" → "OCR (raw):" no feedback quebrou o teste T2.4 da Fase 2 — ajustado para continuar genérico, confirmando o valor do `validate-maketests.sh` como guarda de não-regressão entre fases. |
+| 0+1 (reforço) | 2026-06-20 | Bira | T0.6, T1.8 | `bash validate-maketests.sh` — 24/24 OK. Até aqui, toda correção testada rodava sobre a prova **em branco** ou sobre imagens de OCR isoladas — nunca o pipeline real (gerar → recortar com marcadores/perspectiva → corrigir) com uma resposta de verdade. Novo `tests/test_synthetic_answers.py`: pinta a bolha certa na imagem real (múltipla escolha) e escreve uma frase com fonte handwriting na área pautada real (dissertativa), recompila o LaTeX, rasteriza e corrige de ponta a ponta. **Bug real encontrado e corrigido:** o pré-processamento de `ocr_extract.py` (blur+threshold+morphology, herdado de `QuestionOCR`, pensado para bolhas grossas) destruía completamente texto fino sobre as linhas pautadas — `extract_text` voltava vazio mesmo com texto bem legível na imagem. Corrigido para não pré-processar e usar `--psm 6`; revalidado que o CER da Fase 2 não regrediu (continua bem abaixo de 15%, inclusive com acentos mais corretos que antes). Mesmo assim, o OCR sobre área pautada real ainda tem ruído residual (limitação conhecida, registrada no código) — o critério de T1.8 é "extrai sinal não-trivial quando algo foi escrito, nada quando está em branco", não fidelidade textual perfeita. |
 | 4 | | | T4.1–T4.5 | |
 | 5 | | | T5.1–T5.5 | |
 | 6 | | | T6.1–T6.7, E2E-Q2 | |

@@ -392,6 +392,20 @@ validate_fase6() {
 }
 
 ################################################################################
+# Teste de integração robusto: pipeline completo com respostas sintéticas
+# reais (não em branco) tanto na múltipla escolha quanto na dissertativa.
+# T0.6/T1.8 — ver tests/test_synthetic_answers.py para o passo a passo.
+################################################################################
+validate_synthetic_answers() {
+    (cd "$MAKETESTS_DIR" && python3 tests/test_synthetic_answers.py) > /tmp/validate_synthetic_answers.log 2>&1
+
+    grep -q "^T0.6 OK" /tmp/validate_synthetic_answers.log
+    check "T0.6" "Múltipla escolha end-to-end com resposta real (não em branco)" $?
+    grep -q "^T1.8 OK" /tmp/validate_synthetic_answers.log
+    check "T1.8" "Dissertativa end-to-end com resposta real (OCR real, não mockado)" $?
+}
+
+################################################################################
 # main
 ################################################################################
 echo "================================================"
@@ -403,6 +417,7 @@ source "$MAKETESTS_DIR/.venv/bin/activate" 2>/dev/null || source "$MAKETESTS_DIR
 
 validate_fase0
 validate_fase1
+validate_synthetic_answers
 validate_fase2
 validate_fase3
 validate_fase4
