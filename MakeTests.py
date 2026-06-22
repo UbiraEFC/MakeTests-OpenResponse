@@ -1389,7 +1389,11 @@ class QuestionDissertative(Question):
 	# existir, trocar por chamada a maketests_ext/llm_grader.py, com fallback
 	# para este mock se os.environ.get("MOCK_GRADER") estiver setado.
 	MOCK_SCORE = 50
-	lines      = 10  # quantidade de linhas pautadas na área de resposta
+	# Geometria calibrada para ~8mm entre linhas (pauta de caderno normal) em
+	# A4 com margem de 1in e imagem a 0.9\textwidth: lines=6 + aspectrate=2/1
+	# -> ~8.2mm/linha. Antes (lines=10, aspectrate=6/1) dava ~1.7mm/linha,
+	# fisicamente pequeno demais para escrita humana, não só para o OCR.
+	lines      = 6  # quantidade de linhas pautadas na área de resposta
 
 	statement = None
 	rubric    = None
@@ -1401,7 +1405,7 @@ class QuestionDissertative(Question):
 		self.makeSetup()
 
 	def answerAreaAspectRate(self):
-		return 6/1
+		return 2/1
 
 	def drawAnswerArea(self, img):
 		height, width, _ = img.shape

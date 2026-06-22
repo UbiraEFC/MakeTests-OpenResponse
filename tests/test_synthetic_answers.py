@@ -56,13 +56,15 @@ def paint_bubble(png_path, row):
 
 
 def write_handwritten_text(png_path, text):
-    # Fonte grande o suficiente para o Tesseract distinguir o texto das
-    # linhas pautadas finas ao fundo - tamanhos pequenos (~28px) viram ruído
-    # irreconhecível; 60px foi validado empiricamente.
+    # Com a área redimensionada (lines=6, aspectrate=2/1) e a rasterização a
+    # 300dpi, o limite de legibilidade caiu de ~60px (~8,4mm, ainda com
+    # ruído) para ~12px (~1,7mm, leitura limpa) - testado empiricamente
+    # variando o tamanho linha a linha. 36px (~5mm) fica confortavelmente
+    # dentro da faixa de escrita manuscrita normal, com folga de segurança.
     img = Image.open(png_path).convert("RGB")
     draw = ImageDraw.Draw(img)
-    font = ImageFont.truetype(FONT_PATH, 60)
-    y = BORDER + HEADER_HEIGHT + PADDING + 30
+    font = ImageFont.truetype(FONT_PATH, 36)
+    y = BORDER + HEADER_HEIGHT + PADDING + 15
     draw.text((BORDER + 30, y), text, font=font, fill=(0, 0, 0))
     img.save(png_path)
 
