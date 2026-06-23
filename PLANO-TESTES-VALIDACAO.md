@@ -160,40 +160,50 @@ tests/fixtures/ocr/
 
 ---
 
-## Fase 4 — Avaliação semântica (LLM)
+## Fase 4 — Avaliação semântica via LLM, provider-agnostic
 
 ### Entregável
 
-- `maketests_ext/llm_grader.py` com `grade(enunciado, rubrica, texto) -> dict`.
+- `maketests_ext/llm/` (contrato `GradingPayload`/`GradingResult`/`LLMProvider`, `provider_factory.py`, `response_validator.py`, `prompt_builder.py`) + `maketests_ext/llm_grader.py` (fachada: `grade(payload: GradingPayload) -> GradingResult`).
+- `MockProvider` (heurística de sobreposição de palavras-chave, determinística, sem rede) — é o **default** quando `LLM_PROVIDER` não está definido, para que a suíte automatizada não dependa de credencial.
+- `GeminiProvider` (adapter real, `urllib` stdlib, `responseSchema`/`responseMimeType=application/json` — structured output nativo).
+- Stubs documentais `openai_provider.py`/`anthropic_provider.py`/`maritaca_provider.py` (levantam `NotImplementedError` claro).
 - Prompt versionado em `maketests_ext/prompts/somativo_v1.txt`.
-- Modo **mock** (`LLM_PROVIDER=mock`) e modo **API**.
+- `QuestionDissertative.doCorrection` (MakeTests.py) plugado em `llm_grader.grade(...)` — banner de feedback mostra `suggested_score`/`rationale` reais em vez de "Mock score".
 
 ### Testes
 
-| ID | Teste | Tipo | Critério de aceite |
-|----|-------|------|-------------------|
-| T4.1 | Mock determinístico | Unitário | JSON válido; campos obrigatórios presentes |
-| T4.2 | Schema saída | Unitário | `suggested_score`, `rationale`, `rubric_coverage`, `review_recommended` |
-| T4.3 | Score bounds | Unitário | `suggested_score` ∈ [0, 100] |
-| T4.4 | Resposta vazia | Unitário | Score baixo + `review_recommended=true` |
-| T4.5 | Gabarito alinhado (mock/API) | Integração | Resposta “modelo” recebe score alto |
-| T4.6 | API real (1 chamada) | Manual | Resposta coerente; latência registrada |
-| T4.7 | Sem API key | Unitário | Erro claro; não grava nota como definitiva |
+| ID | Teste | Tipo | Critério de aceite | Como roda |
+|----|-------|------|---------------------|-----------|
+| T4.1 | Mock determinístico | Unitário | Mesma entrada → mesma saída | `validate_fase4()`, `LLM_PROVIDER=mock` |
+| T4.2 | Schema saída | Unitário | `suggested_score`, `rationale`, `rubric_coverage`, `review_recommended`, `provider_metadata` presentes | idem |
+| T4.3 | Score bounds | Unitário | `suggested_score` ∈ [0, 100] | idem |
+| T4.4 | Resposta vazia | Unitário | Score = 0 + `review_recommended=true` | idem |
+| T4.5 | Gabarito alinhado (mock) | Integração | Score ≥50 e maior que o da resposta vazia | idem |
+| T4.6 | API real (1 chamada, Gemini) | **Manual** | Resposta coerente, sem erro | `validate_fase4_live()` — **não** roda no `main()` do `validate-maketests.sh` (evita gastar quota/depender de rede em toda validação) |
+| T4.7 | Sem API key (Gemini) | Unitário | `GradingResult.error="missing_api_key"`, `review_recommended=true`, sem exceção | `validate_fase4()` |
 
-### Campos obrigatórios do JSON
+### Campos do contrato (`GradingResult`)
 
 ```json
 {
   "suggested_score": 0,
   "rationale": "",
   "rubric_coverage": {},
-  "review_recommended": true
+  "review_recommended": true,
+  "provider_metadata": {},
+  "error": null
 }
 ```
 
 ### Evidência
 
-- Log T4.1 + uma execução T4.6 (redigir dados sensíveis).
+`bash validate-maketests.sh` — 30/30 OK (T0–T4, mock). `validate_fase4_live()` rodado manualmente com a Gemini API real:
+
+- 1ª chamada (`gemini-2.5-flash`, resposta completa cobrindo a rubrica): `suggested_score=100`, `review_recommended=false`, ~3s.
+- 2ª chamada via `QuestionDissertative.doCorrection` completo (texto OCR real, cobre só 1 de 3 critérios): `suggested_score=33`, `review_recommended=false`, rationale explicando exatamente o que faltou — confirma que a nota reflete o conteúdo real, não é um valor fixo.
+- Free tier do Gemini tem **quota diária de 20 requisições por modelo** (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`) — esgotada durante os testes desta fase; chamada de verificação final feita com `gemini-2.5-flash-lite` via `run_params={"model": ...}` (override por chamada), confirmando que o mecanismo de override funciona e que a quota é isolada por modelo.
+- `gemini-flash-latest` e `gemini-2.0-flash` não são confiáveis no momento (503 sobrecarregado / 429 quota=0 no free tier) — `gemini-2.5-flash` é o modelo padrão por ser o único validado como estável.
 
 ---
 
@@ -365,7 +375,7 @@ Copie e preencha ao concluir cada fase:
 | 3 | 2026-06-20 | Bira | T3.1–T3.5 | `bash validate-maketests.sh` — 22/22 OK (T0+T1+T2+T3). Implementado: `maketests_ext/text_normalize.py` (`normalize`: NFKC → hifenização de fim de linha → quebras de linha espúrias → espaços duplicados → strip; só stdlib, sem `ftfy`). `QuestionDissertative.doCorrection` agora mostra OCR raw + normalizado no feedback (preservação dos dois textos sem sidecar formal, que é entregável da Fase 6). Pego no caminho: a mudança do prefixo "OCR:" → "OCR (raw):" no feedback quebrou o teste T2.4 da Fase 2 — ajustado para continuar genérico, confirmando o valor do `validate-maketests.sh` como guarda de não-regressão entre fases. |
 | 0+1 (reforço) | 2026-06-20 | Bira | T0.6, T1.8 | `bash validate-maketests.sh` — 24/24 OK. Até aqui, toda correção testada rodava sobre a prova **em branco** ou sobre imagens de OCR isoladas — nunca o pipeline real (gerar → recortar com marcadores/perspectiva → corrigir) com uma resposta de verdade. Novo `tests/test_synthetic_answers.py`: pinta a bolha certa na imagem real (múltipla escolha) e escreve uma frase com fonte handwriting na área pautada real (dissertativa), recompila o LaTeX, rasteriza e corrige de ponta a ponta. **Bug real encontrado e corrigido:** o pré-processamento de `ocr_extract.py` (blur+threshold+morphology, herdado de `QuestionOCR`, pensado para bolhas grossas) destruía completamente texto fino sobre as linhas pautadas — `extract_text` voltava vazio mesmo com texto bem legível na imagem. Corrigido para não pré-processar e usar `--psm 6`; revalidado que o CER da Fase 2 não regrediu (continua bem abaixo de 15%, inclusive com acentos mais corretos que antes). Mesmo assim, o OCR sobre área pautada real ainda tem ruído residual (limitação conhecida, registrada no código) — o critério de T1.8 é "extrai sinal não-trivial quando algo foi escrito, nada quando está em branco", não fidelidade textual perfeita. |
 | 1 (reforço 2) | 2026-06-21 | Bira | T0.6, T1.8 (revalidados) | `bash validate-maketests.sh` — 24/24 OK. O teste de resposta real (linha anterior) revelou que a área dissertativa estava fisicamente pequena demais: A4/margem 1in/`width=.9\textwidth` davam só **~1,72mm entre linhas** (pauta normal é 6-8mm) — problema de espaço para escrita humana, não só de OCR. Aplicado: `QuestionDissertative.lines` 10→**6** e `answerAreaAspectRate()` 6/1→**2/1**, recalculado para ~**8,17mm/linha**; `convertPdfText2PdfImage.sh` `-density` 150→**300**. Resultado medido (escrevendo a mesma frase em 6 tamanhos de fonte numa única imagem e rodando o pipeline completo): antes precisava de fonte ~60px (~8,4mm) e ainda saía com ruído; depois, **12px (~1,7mm) já lê perfeitamente** — menor que escrita manuscrita normal (x-height tipicamente 3-5mm), com boa margem de segurança. Ressalva registrada no código: `ImageUtils.findAnswerAreas` (MakeTests.py) normaliza todo recorte para `IMAGE_WIDTH=1024px` antes do OCR — subir a densidade melhora o *downsample* mas não entrega mais pixels brutos além desse teto; se no futuro isso for insuficiente (letra real de aluno, não fonte sintética limpa), o próximo passo é subir `IMAGE_WIDTH` (mudança maior, usada em todo o sistema) ou migrar para um motor de HTR dedicado (TrOCR/Cloud Vision). Prova de teste passou de 3 para 4 páginas, esperado. |
-| 4 | | | T4.1–T4.5 | |
+| 4 | 2026-06-23 | Bira | T4.1–T4.5, T4.7 (automatizados); T4.6 manual | `bash validate-maketests.sh` — 30/30 OK (T0–T4). Implementado: `maketests_ext/llm/` (contrato `GradingPayload`/`GradingResult`/`LLMProvider`, `provider_factory.py` com default `LLM_PROVIDER=mock` — sem credencial — , `response_validator.py`, `prompt_builder.py` + `prompts/somativo_v1.txt`); `MockProvider` (heurística de sobreposição de palavras-chave, só para testes); `GeminiProvider` (adapter real via `urllib` stdlib — sem SDK novo — com `responseSchema` nativo); stubs `openai`/`anthropic`/`maritaca`. `QuestionDissertative.doCorrection` agora chama `llm_grader.grade(...)` de verdade (banner mostra nota+parecer reais). `+python-dotenv` em requirements.txt; `.env` local (gitignored) e `.env.example` reescritos para o formato provider-agnostic. T4.6 (chamada real) virou `validate_fase4_live()`, fora do `main()` do script (custo/quota/rede) — confirmado manualmente: `gemini-2.5-flash` deu score=100 (resposta completa) e score=33 via pipeline OCR real (resposta parcial, rationale coerente com o que faltou). Achado: free tier do Gemini tem quota de só 20 req/dia por modelo — esgotada durante os testes; contornado com `run_params={"model": "gemini-2.5-flash-lite"}` (override por chamada, quota separada por modelo). Maritaca testada na sessão anterior: chave válida, sem crédito. |
 | 5 | | | T5.1–T5.5 | |
 | 6 | | | T6.1–T6.7, E2E-Q2 | |
 | 7 | | | T7.1–T7.3 | |

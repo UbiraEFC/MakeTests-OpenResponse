@@ -1,0 +1,109 @@
+import json
+import os
+import urllib.error
+import urllib.request
+
+from .base import LLMProvider
+from .prompt_builder import PROMPT_VERSION, build_prompt
+from .response_validator import validate
+from .schemas import GradingResult
+
+DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_TIMEOUT = 30
+API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "suggested_score": {"type": "integer"},
+        "rationale": {"type": "string"},
+        "rubric_coverage": {"type": "object"},
+        "review_recommended": {"type": "boolean"},
+    },
+    "required": ["suggested_score", "rationale", "review_recommended"],
+}
+
+
+class GeminiProvider(LLMProvider):
+    """Adapter inicial (Fase 4) - chama a Gemini API via urllib (stdlib, sem
+    SDK) usando structured output nativo (responseSchema/responseMimeType).
+    """
+
+    def __init__(self, api_key=None, model=None, timeout=None, temperature=None):
+        self.api_key = api_key or os.environ.get("LLM_API_KEY")
+        self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_MODEL
+        self.timeout = float(timeout or os.environ.get("LLM_TIMEOUT") or DEFAULT_TIMEOUT)
+        self.temperature = float(temperature if temperature is not None else os.environ.get("LLM_TEMPERATURE", 0.2))
+
+    def grade_answer(self, payload):
+        run_params = payload.run_params or {}
+        model = run_params.get("model", self.model)
+        provider_metadata = {"provider": "gemini", "model": model, "prompt_version": PROMPT_VERSION}
+
+        if not self.api_key:
+            return GradingResult(
+                suggested_score=0,
+                rationale="",
+                rubric_coverage={},
+                review_recommended=True,
+                provider_metadata=provider_metadata,
+                error="missing_api_key",
+            )
+
+        prompt = build_prompt(payload)
+        body = json.dumps({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": run_params.get("temperature", self.temperature),
+                "responseMimeType": "application/json",
+                "responseSchema": RESPONSE_SCHEMA,
+            },
+        }).encode("utf-8")
+
+        url = "{}/{}:generateContent".format(API_BASE, model)
+        req = urllib.request.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json", "X-goog-api-key": self.api_key},
+        )
+
+        try:
+            timeout = run_params.get("timeout", self.timeout)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw_response = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            return GradingResult(
+                suggested_score=0,
+                rationale="",
+                rubric_coverage={},
+                review_recommended=True,
+                provider_metadata=provider_metadata,
+                error="http_{}: {}".format(e.code, e.read().decode("utf-8", "replace")[:300]),
+            )
+        except (urllib.error.URLError, TimeoutError) as e:
+            return GradingResult(
+                suggested_score=0,
+                rationale="",
+                rubric_coverage={},
+                review_recommended=True,
+                provider_metadata=provider_metadata,
+                error="network_error: {}".format(e),
+            )
+
+        try:
+            text = raw_response["candidates"][0]["content"]["parts"][0]["text"]
+            parsed = json.loads(text)
+        except (KeyError, IndexError, ValueError) as e:
+            return GradingResult(
+                suggested_score=0,
+                rationale="",
+                rubric_coverage={},
+                review_recommended=True,
+                provider_metadata=provider_metadata,
+                error="unparseable_response: {}".format(e),
+            )
+
+        usage = raw_response.get("usageMetadata", {})
+        provider_metadata["usage"] = usage
+        return validate(parsed, provider_metadata=provider_metadata)

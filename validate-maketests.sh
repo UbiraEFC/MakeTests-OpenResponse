@@ -366,7 +366,81 @@ validate_fase4() {
         skip "T4.x" "maketests_ext/llm_grader.py ainda não existe"
         return
     fi
-    skip "T4.x" "llm_grader.py existe, mas validate_fase4() ainda não foi escrita"
+
+    # Suite automatizada roda sem rede/credencial: LLM_PROVIDER=mock.
+    (cd "$MAKETESTS_DIR" && LLM_PROVIDER=mock python3 - <<'PYEOF'
+from maketests_ext.llm.schemas import GradingPayload
+from maketests_ext.llm_grader import grade
+from maketests_ext.llm.gemini_provider import GeminiProvider
+
+rubric = "Deve citar: conversao de luz solar em energia quimica, papel da clorofila, liberacao de oxigenio."
+aligned = GradingPayload(statement="Explique fotossintese.", rubric=rubric,
+                          normalized_text="A fotossintese converte luz solar em energia quimica usando a clorofila e libera oxigenio.")
+blank = GradingPayload(statement="Explique fotossintese.", rubric=rubric, normalized_text="")
+
+# T4.1 - mock deterministico (mesma entrada -> mesma saida)
+r1 = grade(aligned)
+r2 = grade(aligned)
+print("T4.1", "OK" if r1 == r2 else "FAIL r1={} r2={}".format(r1, r2))
+
+# T4.2 - schema da saida
+fields = ("suggested_score", "rationale", "rubric_coverage", "review_recommended", "provider_metadata")
+ok = all(hasattr(r1, f) for f in fields)
+print("T4.2", "OK" if ok else "FAIL")
+
+# T4.3 - score bounds
+print("T4.3", "OK" if 0 <= r1.suggested_score <= 100 else "FAIL score={}".format(r1.suggested_score))
+
+# T4.4 - resposta vazia -> score baixo + review_recommended
+r_blank = grade(blank)
+ok = r_blank.suggested_score == 0 and r_blank.review_recommended is True
+print("T4.4", "OK" if ok else "FAIL {}".format(r_blank))
+
+# T4.5 - payload alinhado ao gabarito -> score bem maior que o vazio
+ok = r1.suggested_score >= 50 and r1.suggested_score > r_blank.suggested_score
+print("T4.5", "OK" if ok else "FAIL score={}".format(r1.suggested_score))
+
+# T4.7 - sem API key (provider gemini direto, nao a fachada) -> erro claro, sem excecao.
+# Remove LLM_API_KEY do ambiente explicitamente: get_provider() ja deu load_dotenv()
+# antes (efeito colateral do .env real), api_key=None sozinho nao bastaria.
+import os
+os.environ.pop("LLM_API_KEY", None)
+gp = GeminiProvider(api_key=None)
+r_noauth = gp.grade_answer(aligned)
+ok = r_noauth.error == "missing_api_key" and r_noauth.review_recommended is True
+print("T4.7", "OK" if ok else "FAIL {}".format(r_noauth))
+PYEOF
+    ) > /tmp/validate_fase4_unit.log 2>&1
+
+    grep -q "^T4.1 OK" /tmp/validate_fase4_unit.log; check "T4.1" "Mock determinístico (mesma entrada -> mesma saída)" $?
+    grep -q "^T4.2 OK" /tmp/validate_fase4_unit.log; check "T4.2" "Schema da saída (GradingResult completo)" $?
+    grep -q "^T4.3 OK" /tmp/validate_fase4_unit.log; check "T4.3" "suggested_score dentro de [0,100]" $?
+    grep -q "^T4.4 OK" /tmp/validate_fase4_unit.log; check "T4.4" "Resposta vazia -> score baixo + review_recommended" $?
+    grep -q "^T4.5 OK" /tmp/validate_fase4_unit.log; check "T4.5" "Resposta alinhada à rubrica -> score alto" $?
+    grep -q "^T4.7 OK" /tmp/validate_fase4_unit.log; check "T4.7" "Sem API key (Gemini): erro claro, sem excecao" $?
+}
+
+################################################################################
+# T4.6 (manual/opt-in) — 1 chamada real à API do provedor configurado em .env.
+# NÃO é chamada por padrão em validate-maketests.sh (custo/rede/quota) — só
+# roda se invocada explicitamente: bash -c 'source validate-maketests.sh; validate_fase4_live'
+################################################################################
+validate_fase4_live() {
+    (cd "$MAKETESTS_DIR" && python3 - <<'PYEOF'
+from maketests_ext.llm.schemas import GradingPayload
+from maketests_ext.llm_grader import grade
+
+p = GradingPayload(
+    statement="Explique o que e fotossintese e sua importancia para os seres vivos.",
+    rubric="Deve citar: conversao de luz solar em energia quimica, papel da clorofila/cloroplastos, liberacao de oxigenio.",
+    normalized_text="A fotossintese converte luz solar em energia quimica usando a clorofila presente nos cloroplastos, liberando oxigenio como subproduto.",
+)
+r = grade(p)
+print(r)
+ok = r.error is None and 0 <= r.suggested_score <= 100 and r.rationale
+print("T4.6", "OK" if ok else "FAIL")
+PYEOF
+    )
 }
 
 ################################################################################
