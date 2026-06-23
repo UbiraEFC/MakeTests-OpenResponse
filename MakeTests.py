@@ -1385,10 +1385,6 @@ class QuestionOCR(Question):
 #############################
 # BEGIN QUESTION DISSERTATIVE #
 class QuestionDissertative(Question):
-	# Score mockado (sem OCR/LLM real ainda - Fases 2-4). Quando o grader real
-	# existir, trocar por chamada a maketests_ext/llm_grader.py, com fallback
-	# para este mock se os.environ.get("MOCK_GRADER") estiver setado.
-	MOCK_SCORE = 50
 	# Geometria calibrada para ~8mm entre linhas (pauta de caderno normal) em
 	# A4 com margem de 1in e imagem a 0.9\textwidth: lines=6 + aspectrate=2/1
 	# -> ~8.2mm/linha. Antes (lines=10, aspectrate=6/1) dava ~1.7mm/linha,
@@ -1419,11 +1415,12 @@ class QuestionDissertative(Question):
 
 	def doCorrection(self, img):
 		import numpy as np
-		score = self.MOCK_SCORE
 
-		# Fase 2/3: extração OCR + normalização já plugadas; a nota ainda é
-		# mockada (Fase 4/LLM não existe ainda). Mantemos raw e normalizado
-		# visíveis aqui em vez de um sidecar formal (isso é Fase 6).
+		# Fase 2/3: extração OCR + normalização. Fase 4: avaliação semântica
+		# via maketests_ext/llm_grader.py — fachada que esconde qual provedor
+		# está ativo (LLM_PROVIDER; default "mock", sem credencial). Raw e
+		# normalizado ficam visíveis aqui em vez de um sidecar formal (isso é
+		# Fase 6).
 		try:
 			from maketests_ext.ocr_extract import extract_text
 			ocr_text = extract_text(img)["text"]
@@ -1436,11 +1433,19 @@ class QuestionDissertative(Question):
 		except Exception as e:
 			normalized_text = "(normalização indisponível: {})".format(e)
 
+		from maketests_ext.llm_grader import grade
+		from maketests_ext.llm.schemas import GradingPayload
+		result = grade(GradingPayload(statement=self.statement, rubric=self.rubric, normalized_text=normalized_text))
+		score = result.suggested_score
+		provider = result.provider_metadata.get("provider", "?")
+		rationale = (result.rationale or result.error or "")[:60]
+		score_line = "Nota sugerida ({}): {} - {}".format(provider, score, rationale)
+
 		imgInfo = np.zeros((120, img.shape[1], 3), np.uint8)
 		imgInfo[:,:] = (255,255,255)
 		ImageUtils.drawTextInsideTheBox(imgInfo[0:40,:], "OCR (raw): {}".format(ocr_text))
 		ImageUtils.drawTextInsideTheBox(imgInfo[40:80,:], "Normalizado: {}".format(normalized_text))
-		ImageUtils.drawTextInsideTheBox(imgInfo[80:120,:], "Mock score (sem LLM ainda): {}".format(score))
+		ImageUtils.drawTextInsideTheBox(imgInfo[80:120,:], score_line)
 		feedback = np.vstack((imgInfo, img))
 
 		return score, img, feedback

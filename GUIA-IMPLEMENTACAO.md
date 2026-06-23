@@ -78,7 +78,8 @@ python -m venv .venv
 source .venv/bin/activate   # Linux/macOS/WSL
 pip install -r requirements.txt
 # Dependências adicionais previstas (Q2):
-# pip install openai python-dotenv jiwer
+# pip install python-dotenv jiwer
+# + SDK do provedor LLM ativo (Fase 4) - ex.: google-genai para o adapter Gemini inicial
 ```
 
 | Pré-requisito | Linux (Debian/Ubuntu) | macOS | Windows |
@@ -181,48 +182,148 @@ pip install -r requirements.txt
 
 **Não incluir na v1:** correção gramatical agressiva (risco de alterar sentido do aluno).
 
+**Integração com a Fase 4:** a saída desta fase alimenta diretamente o campo `normalized_text` do `GradingPayload` (ver Fase 4) — nenhuma outra limpeza de texto ocorre depois disso.
+
 ---
 
-### Fase 4 — Avaliação semântica via LLM (Q2)
+### Fase 4 — Avaliação semântica via LLM, provider-agnostic (Q2)
 
 | Item | Descrição |
 |------|-----------|
-| **O quê** | `llm_grader.py`: envia enunciado + rubrica + texto do aluno; recebe JSON estruturado |
-| **Ferramentas (escolher 1 provedor principal)** | |
-| **Pré-requisitos** | |
+| **O quê** | Avaliação semântica via LLM, acessada **sempre** através de uma camada de abstração de provedor — nenhuma fase posterior (Fase 5, Fase 6, `QuestionDissertative`) importa um SDK de LLM diretamente |
+| **Ferramentas** | Pacote novo `maketests_ext/llm/` (ver §Organização dos módulos); SDK do provedor ativo isolado dentro do respectivo `*_provider.py` |
+| **Provedor inicial** | **Gemini** (Google AI Studio / Gemini API) — ver §Implementação inicial: Gemini |
+| **Pré-requisitos** | Fase 3 (texto normalizado disponível no payload) |
 
-| Provedor | Biblioteca | Pré-requisitos |
-|----------|------------|----------------|
-| **OpenAI** | `openai` | Conta, API key, créditos; modelo ex.: `gpt-4o-mini` (custo) ou `gpt-4o` (qualidade) |
-| **Anthropic** | `anthropic` | API key; modelo Claude |
-| **Maritaca (Sabiá)** | REST/`requests` | Conta Maritaca, API key — alinhado a PT-BR ([maritaca.ai](https://maritaca.ai)) |
+**Por que uma camada de abstração**
 
-**Configuração segura**
+A escolha de provedor de LLM muda com o tempo (preço, qualidade em PT-BR, política de dados, crédito disponível) — isso não deve ditar a arquitetura interna do MakeTests. A abstração existe para:
+
+- **reduzir lock-in tecnológico** — trocar de provedor não deve tocar em `QuestionDissertative`, Fase 5 ou Fase 6;
+- **permitir comparação entre provedores** — rodar o mesmo conjunto de respostas por dois adapters e comparar `suggested_score`/`rationale`;
+- **facilitar testes A/B de qualidade de correção** — relevante para o capítulo de validação do TCC (Fase 8);
+- **suportar critérios institucionais futuros** — custo, privacidade/LGPD, retenção/treinamento de dados, aderência ao português — trocando só o adapter ativo, sem reescrever a integração;
+- **preservar o contrato interno do MakeTests** mesmo que o provedor mude ou deixe de existir.
+
+**Gemini é o provedor inicial só por pragmatismo de prototipação** — a decisão institucional sobre qual provedor usar em produção é orientada por essa abstração, não pelo contrário.
+
+**Contrato do provedor (LLM Provider Adapter)**
+
+Toda avaliação semântica passa por uma função única, implementada por cada adapter:
+
+```python
+def grade_answer(payload: GradingPayload) -> GradingResult:
+    ...
+```
+
+Entrada (`GradingPayload`) — mínimo:
+
+| Campo | Descrição |
+|-------|-----------|
+| `statement` | Enunciado da questão |
+| `rubric` | Rubrica / critérios de correção |
+| `expected_topics` | Gabarito discursivo ou tópicos esperados |
+| `normalized_text` | Texto OCR normalizado (saída da Fase 3) |
+| `context_metadata` | Opcional: id da questão, disciplina, nível, etc. |
+| `run_params` | Opcional: `model`, `temperature`, `timeout` — overrides por chamada |
+
+Saída (`GradingResult`) — mínimo:
+
+| Campo | Descrição |
+|-------|-----------|
+| `suggested_score` | Nota sugerida (0–100) |
+| `rationale` | Parecer textual |
+| `rubric_coverage` | Dict `{critério: bool}` |
+| `review_recommended` | Bool — sinaliza revisão HITL prioritária |
+| `provider_metadata` | Provedor, modelo, tokens, latência, request id — para auditoria (Fase 6) |
+| `error` | Preenchido (demais campos `None`/conservadores) se a chamada falhar — o adapter nunca deixa a exceção do SDK escapar para fora dele |
+
+Esse contrato é o que `llm_grader.py` (fachada, ver §Organização dos módulos) expõe para o resto do sistema. Nenhuma outra parte do código deve conhecer o formato de request/response específico de um provedor.
+
+**Saída estruturada: nativa quando possível, fallback sempre validado**
+
+- Quando o provedor suportar **structured output nativo** (JSON Schema / function calling — Gemini, OpenAI e Anthropic atualmente suportam), o adapter deve usá-lo para reduzir erro de parsing.
+- Quando não suportar, o adapter usa um prompt que pede JSON e faz parsing manual (fallback).
+- **Em ambos os casos**, o objeto retornado passa por `response_validator.py` antes de virar um `GradingResult` — a validação final do schema nunca depende de o provedor "ter prometido" JSON válido. Isso isola o resto do sistema de um provedor que alucine um campo faltante ou um tipo errado.
+
+**Organização dos módulos**
+
+`llm_grader.py` passa a ser a **fachada/orquestrador**: é o único ponto que `QuestionDissertative.doCorrection` chama. Internamente, ele delega para o adapter ativo via `provider_factory.py`. A lógica específica de cada provedor migra para um subpacote dedicado:
+
+```
+maketests_ext/
+├── llm_grader.py            # fachada: grade(payload) -> GradingResult, escolhe o adapter via provider_factory
+└── llm/
+    ├── __init__.py
+    ├── base.py               # classe abstrata/Protocol LLMProvider.grade_answer(payload)
+    ├── schemas.py            # GradingPayload, GradingResult (dataclasses ou pydantic)
+    ├── provider_factory.py   # lê LLM_PROVIDER e instancia o adapter correspondente
+    ├── prompt_builder.py     # monta o prompt a partir do payload (versionado em prompts/)
+    ├── response_validator.py # valida/normaliza a resposta do provedor contra schemas.py
+    ├── gemini_provider.py    # implementação concreta inicial
+    ├── openai_provider.py    # stub documental — implementar quando for adicionar o provedor
+    ├── anthropic_provider.py # stub documental
+    └── maritaca_provider.py  # stub documental (ver nota de crédito em §Provedores: hoje e depois)
+```
+
+**Por que essa organização e não um módulo único:** um `llm_grader.py` sozinho cresceria para conter prompt, parsing e chamada de SDK de N provedores no mesmo arquivo — exatamente o acoplamento que esta fase quer evitar. Separar por arquivo deixa cada adapter substituível e testável isoladamente (a Fase 5/6 pode mockar `LLMProvider` nos testes, sem precisar de API key real).
+
+**Configuração**
+
+A configuração é desacoplada do provedor — trocar de provedor é trocar variáveis de ambiente, não código:
+
+```bash
+LLM_PROVIDER=gemini          # seleciona o adapter via provider_factory.py
+LLM_MODEL=gemini-flash-latest
+LLM_API_KEY=...
+LLM_BASE_URL=...             # quando aplicável (ex.: endpoint custom/proxy)
+LLM_TIMEOUT=30
+LLM_TEMPERATURE=0.2
+```
 
 | Item | Detalhe |
 |------|---------|
-| Arquivo `.env` | `LLM_API_KEY=...`, `LLM_MODEL=...`, `LLM_BASE_URL=...` (se aplicável) |
-| `.gitignore` | Garantir `.env` ignorado |
-| `config.json` ou `llm.json` | Rubricas e prompts versionados **sem** secrets |
+| Secrets (`LLM_API_KEY`) | Sempre em `.env`, nunca versionados — `.gitignore` já cobre `.env` |
+| Prompts e rubricas | Versionados em `maketests_ext/prompts/` (ex.: `somativo_v1.txt`), **sem** secrets |
+| `.env.example` | Atualizado com as 6 variáveis acima, com valores de exemplo |
 
-**Prompt e saída estruturada (modo somativo)**
+**Implementação inicial: Gemini**
 
-Entrada: enunciado, rubrica, gabarito discursivo, texto OCR.
+- **Google AI Studio** é usado só para **prototipar** prompt e schema manualmente antes de codificar o adapter.
+- A implementação produtiva (`gemini_provider.py`) chama a **Gemini API** diretamente (não a UI do AI Studio).
+- Validado nesta sessão: a API key fornecida autenticou e respondeu (`gemini-flash-latest` → resolvido para `gemini-3.5-flash`), HTTP 200 — viável para prototipagem.
+- **Escolher o Gemini agora não compromete a troca futura** — é exatamente o que o contrato desta fase existe para garantir.
 
-Saída JSON esperada:
+**Persistência e auditoria (ponte com a Fase 6)**
 
-```json
-{
-  "suggested_score": 75,
-  "rationale": "A resposta aborda X e Y, mas omite Z.",
-  "rubric_coverage": {"criterio_1": true, "criterio_2": false},
-  "review_recommended": true
-}
-```
+O sidecar da Fase 6 (`Correction/<aluno>/q<N>_assist.json`) deve registrar, além do `GradingResult`:
+
+| Campo adicional | Por quê |
+|------------------|---------|
+| `provider` | Qual adapter gerou a sugestão (`gemini`, `openai`, ...) |
+| `model` | Modelo exato usado (varia mesmo dentro do mesmo provedor) |
+| `prompt_version` | Versão do template em `prompts/` — necessário se o prompt mudar entre execuções |
+| `raw_response` | Resposta crua do provedor, sanitizada — opcional, útil para depurar discordâncias |
+| `structured_result` | O `GradingResult` já validado |
+| `inference_timestamp` | Quando a chamada foi feita |
+| `run_params` | Parâmetros usados (modelo, temperatura, timeout) |
+
+Isso permite comparar provedores e versões de prompt retroativamente sem precisar re-rodar a correção.
+
+**Provedores: hoje e depois**
+
+| Provedor | Status nesta fase | Observação |
+|----------|--------------------|------------|
+| **Gemini** | Implementação inicial (`gemini_provider.py`) | Escolhido por pragmatismo de prototipação — free tier do Google AI Studio acessível, structured output nativo |
+| **OpenAI** | Stub documental | Bom suporte a structured output/function calling; custo por token a avaliar |
+| **Anthropic** | Stub documental | Bom suporte a structured output; avaliar custo/disponibilidade de crédito |
+| **Maritaca (Sabiá)** | Stub documental | Alinhado a PT-BR; **testado nesta sessão — a chave autentica, mas a conta está sem crédito ativo** (`insufficient_funds` em todos os modelos, incl. `sabiazinho`); reavaliar se/quando houver crédito |
+
+O núcleo do MakeTests (Fase 5, Fase 6, `QuestionDissertative`) não depende de qual linha desta tabela está ativa.
 
 **Pré-requisitos pedagógicos:** rubrica escrita pelo docente por questão (campo no módulo Python ou JSON).
 
-**Governança:** não enviar dados identificáveis de alunos sem anonimização; verificar política da API (retenção/treinamento).
+**Governança:** não enviar dados identificáveis de alunos sem anonimização; verificar política de retenção/treinamento de cada provedor antes de decidir o uso em produção (critério institucional, não técnico).
 
 ---
 
@@ -237,13 +338,14 @@ Saída JSON esperada:
 | Sinal | Fonte |
 |-------|-------|
 | Qualidade OCR | `confidence_mean`, `char_doubt_ratio` (Fase 2) |
-| Coerência parecer–nota | Parser da saída LLM (Fase 4) |
+| Coerência parecer–nota | Parser da saída do `GradingResult` (Fase 4) |
 | Cobertura de rubrica | Campos `rubric_coverage` |
+| Resposta estruturada via fallback | `provider_metadata`/estado de `response_validator.py` (Fase 4) — penaliza se precisou cair no fallback em vez de structured output nativo |
 | Estabilidade inferencial | Desvio entre execuções repetidas (opcional) |
 
 **Saída:** inteiro 0–100 ou faixas (`alta` / `média` / `baixa`) + flag `review_recommended`.
 
-**Entregável:** função pura testável sem MakeTests completo.
+**Entregável:** função pura testável sem MakeTests completo — recebe um `GradingResult` (ou um mock dele), não depende de qual provedor o gerou.
 
 ---
 
@@ -259,7 +361,7 @@ Saída JSON esperada:
 
 | # | Descrição |
 |---|-----------|
-| 6.1 | Sidecar `Correction/<aluno>/q<N>_assist.json` com score sugerido, confiança, parecer, texto OCR |
+| 6.1 | Sidecar `Correction/<aluno>/q<N>_assist.json` com score sugerido, confiança, parecer, texto OCR, **e os campos de proveniência do provedor** (`provider`, `model`, `prompt_version`, `inference_timestamp` — ver Fase 4 §Persistência e auditoria) |
 | 6.2 | CSV: manter coluna de score **consolidado**; opcional colunas `score_sugerido`, `confianca`, `status_hitl` (`pendente`/`aceito`/`ajustado`) |
 | 6.3 | Script `review_hitl.py` (CLI): listar pendentes de baixa confiança; professor informa nota final |
 | 6.4 | Template `-e dissertative` em `MakeTests.py` (como `-e ocr`, `-e essay`) |
@@ -306,13 +408,24 @@ Saída JSON esperada:
 ```
 MakeTests/
 ├── MakeTests.py                 # + class QuestionDissertative; + -e dissertative
-├── requirements.txt             # + openai, python-dotenv, jiwer (e opcionais)
-├── .env.example                 # template de variáveis (sem secrets)
+├── requirements.txt             # + SDK do provedor ativo (ex.: google-genai), python-dotenv, jiwer (e opcionais)
+├── .env.example                 # template de variáveis (sem secrets) - inclui LLM_PROVIDER e afins
 ├── maketests_ext/               # novo pacote (proposta)
 │   ├── __init__.py
 │   ├── ocr_extract.py
 │   ├── text_normalize.py
-│   ├── llm_grader.py
+│   ├── llm_grader.py            # fachada: grade(payload) -> GradingResult
+│   ├── llm/                     # camada de abstração de provedor (Fase 4)
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── schemas.py
+│   │   ├── provider_factory.py
+│   │   ├── prompt_builder.py
+│   │   ├── response_validator.py
+│   │   ├── gemini_provider.py
+│   │   ├── openai_provider.py       # stub documental
+│   │   ├── anthropic_provider.py    # stub documental
+│   │   └── maritaca_provider.py     # stub documental
 │   ├── confidence_score.py
 │   └── prompts/
 │       └── somativo_v1.txt
@@ -329,22 +442,28 @@ MakeTests/
 ## 5. Ordem de execução recomendada (Q2)
 
 ```
-Fase 0  Ambiente
+Fase 0   Ambiente
   ↓
-Fase 1  QuestionDissertative (mock: score fixo)
+Fase 1   QuestionDissertative (mock: score fixo)
   ↓
-Fase 2  OCR (Tesseract)
+Fase 2   OCR (Tesseract)
   ↓
-Fase 3  Normalização
+Fase 3   Normalização
   ↓
-Fase 4  LLM (JSON estruturado)
+Fase 4a  Schema interno estável (schemas.py + base.py) - contrato antes de qualquer SDK
   ↓
-Fase 5  Score de confiança
+Fase 4b  Adapter Gemini (gemini_provider.py) - primeira implementação concreta
   ↓
-Fase 6  HITL + sidecar + template -e dissertative
+Fase 4c  llm_grader.py (fachada) plugado em QuestionDissertative.doCorrection
   ↓
-Fase 7  Experimento CER/WER (paralelo possível após Fase 2)
+Fase 5   Score de confiança (usa GradingResult + provider_metadata)
+  ↓
+Fase 6   HITL + sidecar (persiste provider/model/prompt_version) + template -e dissertative
+  ↓
+Fase 7   Experimento CER/WER (paralelo possível após Fase 2)
 ```
+
+A ordem 4a→4b→4c é deliberada: o schema/contrato (4a) é definido **antes** de qualquer SDK concreto, para garantir que o resto do pipeline (5, 6) é desenhado contra o contrato, não contra particularidades do Gemini.
 
 ---
 
@@ -353,10 +472,12 @@ Fase 7  Experimento CER/WER (paralelo possível após Fase 2)
 - [ ] Ambiente WSL funcional (`GUIA-EXECUCAO-WSL.md` §6 — T0.1–T0.4)
 - [ ] `MakeTests.py` gera e corrige questão objetiva de exemplo
 - [ ] Tesseract com `por` instalado (`tesseract --list-langs`)
-- [ ] Conta e API key do provedor LLM escolhido
-- [ ] `.env` configurado a partir de `.env.example`
+- [ ] Schema interno de avaliação definido (`GradingPayload`/`GradingResult` em `schemas.py`)
+- [ ] Provedor padrão inicial escolhido (Gemini) e API key validada
+- [ ] `.env` configurado a partir de `.env.example`, compatível com a abstração de provedor (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, ...)
 - [ ] Rubrica piloto redigida para 1 questão dissertativa de teste
 - [ ] Definição institucional sobre dados de alunos (anonimização)
+- [ ] Política institucional de dados por provedor definida (LGPD, retenção, treinamento) — antes de decidir o provedor de produção
 
 ---
 
