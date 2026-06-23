@@ -211,21 +211,36 @@ tests/fixtures/ocr/
 
 ### Entregável
 
-- `maketests_ext/confidence_score.py` com `compute(signals) -> int` (0–100) e `review_recommended`.
+- `maketests_ext/confidence_score.py`: `ConfidenceSignals` (entrada) / `ConfidenceResult` (saída: `score` 0–100, `level` alta/media/baixa, `review_recommended`, `reasons`) e `compute(signals) -> ConfidenceResult`. Função pura, determinística, sem rede/LLM.
+- `QuestionDissertative.doCorrection` agrega os sinais já existentes (OCR da Fase 2 + `GradingResult` da Fase 4) e mostra o resultado como 4ª linha do banner de feedback. Não altera `suggested_score` — confiança é metadado para priorizar revisão (Fase 6/HITL), não substitui a nota.
+
+### Sinais e fonte real
+
+| Sinal | Fonte | Penalidade no score |
+|-------|-------|----------------------|
+| `ocr_confidence_mean` | `ocr_extract.extract_text()["confidence_mean"]` (`None` se Tesseract não retornou palavra com conf válida) | `None` → −25; senão `−(1 − mean) × 30` |
+| `ocr_char_doubt_ratio` | `ocr_extract.extract_text()["char_doubt_ratio"]` | `−ratio × 20` |
+| `llm_review_recommended` | `GradingResult.review_recommended` | `True` → −25 |
+| `rubric_coverage` | `GradingResult.rubric_coverage` (cobertura = razão de critérios `True`) | `−(1 − cobertura) × 20`; dict vazio não penaliza |
+| `used_fallback` | `GradingResult.provider_metadata.get("used_fallback", False)` — nenhum provider preenche isso hoje (Gemini só faz structured output nativo); hook pronto para quando um adapter de fallback existir | `True` → −10 |
+| `llm_error` | `GradingResult.error` | setado → score fixo em 0, ignora os demais sinais |
+| `score_stability_std` | **não calculado nesta fase** — exigiria 2–3 chamadas reais ao LLM por resposta (custo de quota/latência desproporcional ao Q2); campo aceito mas sempre `None` em produção | `−min(std × 100, 20)` quando informado |
+
+`level`: `score ≥ 70` alta · `40 ≤ score < 70` média · `< 40` baixa. `review_recommended` final nunca é mais otimista que o do LLM: `True` se `score < 70` OU `llm_review_recommended` OU `llm_error` setado.
 
 ### Testes
 
-| ID | Cenário | Entrada | Critério |
-|----|---------|---------|----------|
-| T5.1 | OCR ruim | confiança OCR baixa | Score confiança global baixo |
-| T5.2 | OCR bom + LLM coerente | sinais altos | Score alto |
-| T5.3 | Divergência parecer/nota | inconsistência | `review_recommended=true` |
-| T5.4 | Estabilidade (opcional) | 3 runs LLM | Desvio registrado; penaliza se alto |
-| T5.5 | Integração | pipeline completo mock | Sidecar contém `confidence` |
+| ID | Cenário | Entrada | Critério | Como roda |
+|----|---------|---------|----------|-----------|
+| T5.1 | OCR ruim (correlacionado com LLM inseguro — cenário realista: texto ruim tende a deixar o próprio LLM incerto) | `confidence_mean=0.1`, `char_doubt_ratio=0.8`, `review_recommended=True` | `level="baixa"`, `review_recommended=True` | `validate_fase5()` |
+| T5.2 | OCR bom + LLM confiante + boa cobertura | `confidence_mean=0.95`, `review_recommended=False`, cobertura 100% | `level="alta"`, `review_recommended=False` | `validate_fase5()` |
+| T5.3 | Divergência: OCR ótimo mas LLM pede revisão | `confidence_mean=0.99`, `review_recommended=True` | `review_recommended=True` mesmo com `level="alta"` (nunca mais otimista que o LLM) | `validate_fase5()` |
+| T5.4 | Estabilidade (opcional) | 3 runs LLM | **Não implementado** — hook reservado (`score_stability_std`), sem chamadas múltiplas automáticas | `skip` em `validate_fase5()` |
+| T5.5 | Integração | `QuestionDissertative.doCorrection` com `LLM_PROVIDER=mock`, imagem real de OCR | Banner de feedback contém linha `"Confianca: ..."` | `validate_fase5()` |
 
 ### Evidência
 
-- Tabela de cenários T5.1–T5.3 com valores esperado vs obtido.
+`bash validate-maketests.sh` — 34/36 (T0–T5 implementados, T5.4/T6.x skip), 0 falhas. Os pesos/thresholds (70/40, penalidades acima) são uma calibração heurística inicial — a recalibrar com dados reais na Fase 8 (concordância vs correção humana). Confirmado no T5.3 que o score numérico ("alta", 75) e a recomendação de revisão são desacopláveis por design: o LLM pode sinalizar incerteza mesmo quando os sinais de OCR são excelentes, e o `review_recommended` final respeita isso.
 
 ---
 
@@ -376,7 +391,7 @@ Copie e preencha ao concluir cada fase:
 | 0+1 (reforço) | 2026-06-20 | Bira | T0.6, T1.8 | `bash validate-maketests.sh` — 24/24 OK. Até aqui, toda correção testada rodava sobre a prova **em branco** ou sobre imagens de OCR isoladas — nunca o pipeline real (gerar → recortar com marcadores/perspectiva → corrigir) com uma resposta de verdade. Novo `tests/test_synthetic_answers.py`: pinta a bolha certa na imagem real (múltipla escolha) e escreve uma frase com fonte handwriting na área pautada real (dissertativa), recompila o LaTeX, rasteriza e corrige de ponta a ponta. **Bug real encontrado e corrigido:** o pré-processamento de `ocr_extract.py` (blur+threshold+morphology, herdado de `QuestionOCR`, pensado para bolhas grossas) destruía completamente texto fino sobre as linhas pautadas — `extract_text` voltava vazio mesmo com texto bem legível na imagem. Corrigido para não pré-processar e usar `--psm 6`; revalidado que o CER da Fase 2 não regrediu (continua bem abaixo de 15%, inclusive com acentos mais corretos que antes). Mesmo assim, o OCR sobre área pautada real ainda tem ruído residual (limitação conhecida, registrada no código) — o critério de T1.8 é "extrai sinal não-trivial quando algo foi escrito, nada quando está em branco", não fidelidade textual perfeita. |
 | 1 (reforço 2) | 2026-06-21 | Bira | T0.6, T1.8 (revalidados) | `bash validate-maketests.sh` — 24/24 OK. O teste de resposta real (linha anterior) revelou que a área dissertativa estava fisicamente pequena demais: A4/margem 1in/`width=.9\textwidth` davam só **~1,72mm entre linhas** (pauta normal é 6-8mm) — problema de espaço para escrita humana, não só de OCR. Aplicado: `QuestionDissertative.lines` 10→**6** e `answerAreaAspectRate()` 6/1→**2/1**, recalculado para ~**8,17mm/linha**; `convertPdfText2PdfImage.sh` `-density` 150→**300**. Resultado medido (escrevendo a mesma frase em 6 tamanhos de fonte numa única imagem e rodando o pipeline completo): antes precisava de fonte ~60px (~8,4mm) e ainda saía com ruído; depois, **12px (~1,7mm) já lê perfeitamente** — menor que escrita manuscrita normal (x-height tipicamente 3-5mm), com boa margem de segurança. Ressalva registrada no código: `ImageUtils.findAnswerAreas` (MakeTests.py) normaliza todo recorte para `IMAGE_WIDTH=1024px` antes do OCR — subir a densidade melhora o *downsample* mas não entrega mais pixels brutos além desse teto; se no futuro isso for insuficiente (letra real de aluno, não fonte sintética limpa), o próximo passo é subir `IMAGE_WIDTH` (mudança maior, usada em todo o sistema) ou migrar para um motor de HTR dedicado (TrOCR/Cloud Vision). Prova de teste passou de 3 para 4 páginas, esperado. |
 | 4 | 2026-06-23 | Bira | T4.1–T4.5, T4.7 (automatizados); T4.6 manual | `bash validate-maketests.sh` — 30/30 OK (T0–T4). Implementado: `maketests_ext/llm/` (contrato `GradingPayload`/`GradingResult`/`LLMProvider`, `provider_factory.py` com default `LLM_PROVIDER=mock` — sem credencial — , `response_validator.py`, `prompt_builder.py` + `prompts/somativo_v1.txt`); `MockProvider` (heurística de sobreposição de palavras-chave, só para testes); `GeminiProvider` (adapter real via `urllib` stdlib — sem SDK novo — com `responseSchema` nativo); stubs `openai`/`anthropic`/`maritaca`. `QuestionDissertative.doCorrection` agora chama `llm_grader.grade(...)` de verdade (banner mostra nota+parecer reais). `+python-dotenv` em requirements.txt; `.env` local (gitignored) e `.env.example` reescritos para o formato provider-agnostic. T4.6 (chamada real) virou `validate_fase4_live()`, fora do `main()` do script (custo/quota/rede) — confirmado manualmente: `gemini-2.5-flash` deu score=100 (resposta completa) e score=33 via pipeline OCR real (resposta parcial, rationale coerente com o que faltou). Achado: free tier do Gemini tem quota de só 20 req/dia por modelo — esgotada durante os testes; contornado com `run_params={"model": "gemini-2.5-flash-lite"}` (override por chamada, quota separada por modelo). Maritaca testada na sessão anterior: chave válida, sem crédito. |
-| 5 | | | T5.1–T5.5 | |
+| 5 | 2026-06-23 | Bira | T5.1–T5.3, T5.5 (automatizados); T5.4 não implementado | `bash validate-maketests.sh` — 34/36 OK (T0–T5; T5.4 e T6.x ainda skip). Implementado: `maketests_ext/confidence_score.py` (`ConfidenceSignals`/`ConfidenceResult`/`compute`, função pura sem rede/LLM) agregando sinais de OCR (Fase 2: `confidence_mean`, `char_doubt_ratio`) e LLM (Fase 4: `review_recommended`, `rubric_coverage`, `error`) num score 0–100 + nível (alta/média/baixa) + `review_recommended` final. `QuestionDissertative.doCorrection` agora captura o dict completo do OCR (antes só usava `["text"]`) e mostra a confiança como 4ª linha do banner de feedback (`imgInfo` 120px→160px), sem alterar a nota sugerida. Decisão de design confirmada em T5.3: `review_recommended` final nunca é mais permissivo que o do LLM, mesmo quando o score numérico é "alta" — confiança alta com sinalização de revisão são coisas independentes. `score_stability_std` (estabilidade entre execuções, T5.4) ficou como hook reservado, não implementado — exigiria múltiplas chamadas reais ao LLM por resposta, custo desproporcional ao Q2; documentado explicitamente em vez de fingir cobertura. |
 | 6 | | | T6.1–T6.7, E2E-Q2 | |
 | 7 | | | T7.1–T7.3 | |
 

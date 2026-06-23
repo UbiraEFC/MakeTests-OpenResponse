@@ -1418,14 +1418,17 @@ class QuestionDissertative(Question):
 
 		# Fase 2/3: extração OCR + normalização. Fase 4: avaliação semântica
 		# via maketests_ext/llm_grader.py — fachada que esconde qual provedor
-		# está ativo (LLM_PROVIDER; default "mock", sem credencial). Raw e
+		# está ativo (LLM_PROVIDER; default "mock", sem credencial). Fase 5:
+		# score de confiança heurístico, agregando sinais de OCR e LLM — não
+		# altera a nota sugerida, só prioriza revisão (Fase 6/HITL). Raw e
 		# normalizado ficam visíveis aqui em vez de um sidecar formal (isso é
 		# Fase 6).
 		try:
 			from maketests_ext.ocr_extract import extract_text
-			ocr_text = extract_text(img)["text"]
+			ocr_result = extract_text(img)
 		except Exception as e:
-			ocr_text = "(OCR indisponível: {})".format(e)
+			ocr_result = {"text": "(OCR indisponível: {})".format(e), "confidence_mean": None, "char_doubt_ratio": 0.0}
+		ocr_text = ocr_result["text"]
 
 		try:
 			from maketests_ext.text_normalize import normalize
@@ -1441,11 +1444,27 @@ class QuestionDissertative(Question):
 		rationale = (result.rationale or result.error or "")[:60]
 		score_line = "Nota sugerida ({}): {} - {}".format(provider, score, rationale)
 
-		imgInfo = np.zeros((120, img.shape[1], 3), np.uint8)
+		try:
+			from maketests_ext.confidence_score import ConfidenceSignals, compute as compute_confidence
+			confidence = compute_confidence(ConfidenceSignals(
+				ocr_confidence_mean=ocr_result.get("confidence_mean"),
+				ocr_char_doubt_ratio=ocr_result.get("char_doubt_ratio", 0.0),
+				llm_review_recommended=result.review_recommended,
+				llm_error=result.error,
+				rubric_coverage=result.rubric_coverage,
+				used_fallback=result.provider_metadata.get("used_fallback", False),
+			))
+			confidence_line = "Confianca: {} ({}) - revisar: {}".format(
+				confidence.level, confidence.score, "sim" if confidence.review_recommended else "nao")
+		except Exception as e:
+			confidence_line = "Confianca indisponivel: {}".format(e)
+
+		imgInfo = np.zeros((160, img.shape[1], 3), np.uint8)
 		imgInfo[:,:] = (255,255,255)
 		ImageUtils.drawTextInsideTheBox(imgInfo[0:40,:], "OCR (raw): {}".format(ocr_text))
 		ImageUtils.drawTextInsideTheBox(imgInfo[40:80,:], "Normalizado: {}".format(normalized_text))
 		ImageUtils.drawTextInsideTheBox(imgInfo[80:120,:], score_line)
+		ImageUtils.drawTextInsideTheBox(imgInfo[120:160,:], confidence_line)
 		feedback = np.vstack((imgInfo, img))
 
 		return score, img, feedback

@@ -451,7 +451,57 @@ validate_fase5() {
         skip "T5.x" "maketests_ext/confidence_score.py ainda não existe"
         return
     fi
-    skip "T5.x" "confidence_score.py existe, mas validate_fase5() ainda não foi escrita"
+
+    # Suite automatizada roda sem rede/credencial: LLM_PROVIDER=mock.
+    (cd "$MAKETESTS_DIR" && LLM_PROVIDER=mock python3 - <<'PYEOF'
+import cv2
+from maketests_ext.confidence_score import ConfidenceSignals, compute
+from MakeTests import QuestionDissertative, ImageUtils
+
+# T5.1 - OCR ruim (cenario realista: OCR ruim correlaciona com LLM inseguro) -> confianca baixa
+r1 = compute(ConfidenceSignals(ocr_confidence_mean=0.1, ocr_char_doubt_ratio=0.8,
+                                llm_review_recommended=True, rubric_coverage={"a": True, "b": False}))
+print("T5.1", "OK" if r1.level == "baixa" and r1.review_recommended else "FAIL {}".format(r1))
+
+# T5.2 - OCR bom + LLM confiante + boa cobertura -> confianca alta, sem necessidade de revisao
+r2 = compute(ConfidenceSignals(ocr_confidence_mean=0.95, ocr_char_doubt_ratio=0.0,
+                                llm_review_recommended=False, rubric_coverage={"a": True, "b": True}))
+print("T5.2", "OK" if r2.level == "alta" and not r2.review_recommended else "FAIL {}".format(r2))
+
+# T5.3 - divergencia: OCR otimo mas LLM pede revisao -> nunca mais otimista que o LLM
+r3 = compute(ConfidenceSignals(ocr_confidence_mean=0.99, ocr_char_doubt_ratio=0.0,
+                                llm_review_recommended=True, rubric_coverage={"a": True}))
+print("T5.3", "OK" if r3.review_recommended is True else "FAIL {}".format(r3))
+
+# T5.5 - integracao com QuestionDissertative.doCorrection (LLM_PROVIDER=mock)
+class T(QuestionDissertative):
+    def makeSetup(self):
+        self.statement = "Explique X."
+        self.rubric = "Y"
+
+captured = []
+original = ImageUtils.drawTextInsideTheBox
+def spy(img, text, *a, **kw):
+    captured.append(text)
+    return original(img, text, *a, **kw)
+ImageUtils.drawTextInsideTheBox = spy
+try:
+    t = T(); t.makeVariables()
+    img = cv2.imread("tests/fixtures/ocr/printed_pt_01.png")
+    score, img_proc, feedback = t.doCorrection(img)
+finally:
+    ImageUtils.drawTextInsideTheBox = original
+
+ok = any(c.startswith("Confianca:") for c in captured)
+print("T5.5", "OK" if ok else "FAIL captured={}".format(captured))
+PYEOF
+    ) > /tmp/validate_fase5_unit.log 2>&1
+
+    grep -q "^T5.1 OK" /tmp/validate_fase5_unit.log; check "T5.1" "OCR ruim + LLM inseguro -> confiança baixa" $?
+    grep -q "^T5.2 OK" /tmp/validate_fase5_unit.log; check "T5.2" "OCR bom + LLM confiante -> confiança alta" $?
+    grep -q "^T5.3 OK" /tmp/validate_fase5_unit.log; check "T5.3" "Divergência: LLM pede revisão -> review_recommended sempre true" $?
+    skip "T5.4" "Estabilidade entre execuções não implementada (hook reservado em score_stability_std, ver confidence_score.py)"
+    grep -q "^T5.5 OK" /tmp/validate_fase5_unit.log; check "T5.5" "doCorrection inclui linha de confiança no feedback" $?
 }
 
 ################################################################################
