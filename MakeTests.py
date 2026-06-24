@@ -1420,9 +1420,9 @@ class QuestionDissertative(Question):
 		# via maketests_ext/llm_grader.py — fachada que esconde qual provedor
 		# está ativo (LLM_PROVIDER; default "mock", sem credencial). Fase 5:
 		# score de confiança heurístico, agregando sinais de OCR e LLM — não
-		# altera a nota sugerida, só prioriza revisão (Fase 6/HITL). Raw e
-		# normalizado ficam visíveis aqui em vez de um sidecar formal (isso é
-		# Fase 6).
+		# altera a nota sugerida, só prioriza revisão. Fase 6: tudo isso fica
+		# disponível em self.last_assist para Main.doCorrection persistir num
+		# sidecar JSON por aluno/questão (review_hitl.py consome esse sidecar).
 		try:
 			from maketests_ext.ocr_extract import extract_text
 			ocr_result = extract_text(img)
@@ -1444,6 +1444,7 @@ class QuestionDissertative(Question):
 		rationale = (result.rationale or result.error or "")[:60]
 		score_line = "Nota sugerida ({}): {} - {}".format(provider, score, rationale)
 
+		confidence = None
 		try:
 			from maketests_ext.confidence_score import ConfidenceSignals, compute as compute_confidence
 			confidence = compute_confidence(ConfidenceSignals(
@@ -1458,6 +1459,25 @@ class QuestionDissertative(Question):
 				confidence.level, confidence.score, "sim" if confidence.review_recommended else "nao")
 		except Exception as e:
 			confidence_line = "Confianca indisponivel: {}".format(e)
+
+		try:
+			import datetime
+			self.last_assist = {
+				"ocr_text": ocr_text,
+				"normalized_text": normalized_text,
+				"suggested_score": result.suggested_score,
+				"rationale": result.rationale,
+				"rubric_coverage": result.rubric_coverage,
+				"review_recommended": result.review_recommended,
+				"error": result.error,
+				"provider_metadata": result.provider_metadata,
+				"confidence_score": confidence.score if confidence else None,
+				"confidence_level": confidence.level if confidence else None,
+				"confidence_reasons": confidence.reasons if confidence else [],
+				"inference_timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+			}
+		except Exception:
+			self.last_assist = None
 
 		imgInfo = np.zeros((160, img.shape[1], 3), np.uint8)
 		imgInfo[:,:] = (255,255,255)
@@ -1680,7 +1700,16 @@ class CorrectionManager:
 					ret[f] = line_dict[f]
 					changed = True
 			if student[f] is not None and student[f] != '':
-				all_questions.append(student[f])
+				# Pontuacoes recarregadas de um CSV existente (load()) chegam como
+				# str; pontuacoes recem-atualizadas na mesma execucao chegam como
+				# int/float. Sem normalizar aqui, final_calc mistura tipos (ex.:
+				# "100"*peso vira repeticao de string) e sum() quebra com
+				# TypeError. Bug latente, exposto por review_hitl.py (Fase 6),
+				# que sempre parte de um CorrectionManager recem-carregado do CSV.
+				try:
+					all_questions.append(float(student[f]))
+				except (TypeError, ValueError):
+					all_questions.append(student[f])
 
 		# Calculate/recalculate final score (if necessary or possible)
 		if len(all_questions)==self.num_quest and (changed or student[self.headerLabels['final']] is None or student[self.headerLabels['final']] == ''):
@@ -2095,6 +2124,32 @@ class Main:
 
 			# Update the score of current question
 			updated_score, all_scores = self.correction.updateScore(student, question_num, score)
+
+			# Fase 6: persiste o sidecar de assistencia (OCR, parecer, confianca,
+			# status HITL) para questoes que o produzem (hoje, QuestionDissertative).
+			# Questoes objetivas nao tem last_assist -> nenhum sidecar e escrito.
+			if getattr(question, "last_assist", None) is not None:
+				import json, os
+				field_name = self.correction.fieldsname_quest[question_num]
+				_, full_path_student = self.makeDirectoryForAStudent(student)
+				sidecar_path = os.path.join(full_path_student, field_name + "_assist.json")
+				assist = dict(question.last_assist)
+				assist["question"] = field_name
+				assist["student"] = self.correction.getIdentification(student)
+				assist["status_hitl"] = "pendente"
+				assist["manual_score"] = None
+				if os.path.exists(sidecar_path):
+					# Preserva decisao HITL ja tomada entre re-scans (rodar -p de
+					# novo nao deve apagar uma revisao humana ja feita).
+					try:
+						with open(sidecar_path) as f:
+							prev = json.load(f)
+						assist["status_hitl"] = prev.get("status_hitl", "pendente")
+						assist["manual_score"] = prev.get("manual_score")
+					except Exception:
+						pass
+				with open(sidecar_path, "w") as f:
+					json.dump(assist, f, ensure_ascii=False, indent=2)
 
 			# Show correct answer in image
 			if self.verbose > 0 and ansAreaPosProc is not None:
