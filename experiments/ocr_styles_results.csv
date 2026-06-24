@@ -1,0 +1,10 @@
+estilo,arquivo,texto_esperado,texto_obtido,cer,wer,confidence_score
+cursiva,cursiva_1,A fotossíntese converte luz solar em energia química.,À fotossíntese converte luz solar em energia química.,0.0189,0.125,85
+cursiva,cursiva_2,"O ciclo da água envolve evaporação, condensação e precipitação.","O ciclo da água envelve evaporação, condensação e precipitação.",0.0159,0.1111,95
+cursiva,cursiva_3,A revolução industrial transformou a produção e o trabalho.,À revolução industrial transformou a produção e o trabalho.,0.0169,0.1111,82
+forma,forma_1,A fotossíntese converte luz solar em energia química.,A fotossíntese converte Luz solar em energia química.,0.0189,0.125,98
+forma,forma_2,"O ciclo da água envolve evaporação, condensação e precipitação.","O ciclo da água envolve evaporação, condensação e precipitação.",0.0,0.0,99
+forma,forma_3,A revolução industrial transformou a produção e o trabalho.,A revolução industrial transformou a produção e o trabalho.,0.0,0.0,99
+misto,misto_1,A fotossíntese converte luz solar em energia química.,A fotossíntese converte (13 solar em energia química.,0.0566,0.125,85
+misto,misto_2,"O ciclo da água envolve evaporação, condensação e precipitação.","O ciclo da água envolve evaporação, condensação é precipitação.",0.0159,0.1111,92
+misto,misto_3,A revolução industrial transformou a produção e o trabalho.,A revelação industrial transformou q predução e é trabalho.,0.0847,0.4444,80

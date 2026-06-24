@@ -8,3 +8,4 @@ pytesseract==0.3.10
 chardet==5.1.0
 scipy==1.11.1
 python-dotenv==1.2.2
+jiwer==4.0.0

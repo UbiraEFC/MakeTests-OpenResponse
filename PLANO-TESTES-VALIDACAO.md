@@ -295,19 +295,32 @@ Sem `raw_response` (política de sanitização de provedor ainda não definida �
 
 ### Entregável
 
-- `experiments/ocr_styles_eval.py` + CSV de resultados (CER/WER por estilo).
+- Corpus sintético `tests/fixtures/ocr_styles/` (`generate_corpus.py` + 9 imagens/.txt: 3 frases PT × 3 estilos — letra de forma/Patrick Hand, cursiva/Dancing Script, misto/alternância palavra a palavra entre as duas fontes).
+- Fonte cursiva vendorizada: `tests/fixtures/ocr/fonts/DancingScript-Regular.ttf` + `DancingScript-LICENSE.txt` (OFL, baixada de `google/fonts`, mesmo padrão já usado para a Patrick Hand).
+- `experiments/ocr_styles_eval.py`: roda `maketests_ext.ocr_extract.extract_text` (mesma extração da produção) + `jiwer.cer`/`jiwer.wer` por imagem, e `maketests_ext.confidence_score.compute` com sinais LLM neutralizados (isola a contribuição do OCR) — grava `experiments/ocr_styles_results.csv` e imprime resumo por estilo.
+- `+jiwer` em `requirements.txt`.
 
 ### Testes
 
-| ID | Teste | Critério |
-|----|-------|----------|
-| T7.1 | Corpus mínimo ≥ 9 imagens (3 por estilo) | Executável |
-| T7.2 | Métricas por categoria | Tabela CER/WER |
-| T7.3 | Correlação qualitativa | Cursiva ≥ forma em CER (hipótese documentada) |
+| ID | Teste | Critério | Como roda |
+|----|-------|----------|-----------|
+| T7.1 | Corpus mínimo ≥ 9 imagens (3 por estilo) | Executável | `validate_fase7()` |
+| T7.2 | Métricas por categoria | CSV com CER/WER/confiança por imagem, não vazio | `validate_fase7()` |
+| T7.3 | Correlação qualitativa | Cursiva ≥ forma em CER (hipótese documentada, nunca bloqueante) | `validate_fase7()` |
 
-Não bloqueia E2E-Q2; bloqueia apenas conclusões sobre estilo de escrita no TCC.
+Não bloqueia E2E-Q2 (já coberto desde a Fase 6); bloqueia apenas conclusões sobre estilo de escrita no TCC.
 
----
+### Evidência
+
+`bash validate-maketests.sh` — 43/44 OK (T0–T7; T5.4 ainda skip), 0 falhas. Resultado real medido (`experiments/ocr_styles_results.csv`, 2026-06-23):
+
+| Estilo | CER médio | WER médio | Confiança média |
+|--------|-----------|-----------|------------------|
+| letra de forma | 0,0063 | 0,0417 | 98,7 |
+| cursiva | 0,0172 | 0,1157 | 87,3 |
+| misto | 0,0524 | 0,2268 | 85,7 |
+
+**Hipótese confirmada** (cursiva CER > forma CER) e o estilo "misto" (alternância de fonte palavra a palavra, simulando inconsistência real de quem mistura cursiva e forma na mesma resposta) teve o peor desempenho dos três — resultado não previsto explicitamente no guia, mas coerente: confundir o OCR com troca de estilo no meio do texto é pior do que um estilo único e difícil. O score de confiança da Fase 5 acompanha a mesma ordem (forma > cursiva > misto), dando suporte qualitativo a usá-lo como proxy de risco de OCR mesmo sem rótulo humano.
 
 ## Fase 8 — Q3 (validação empírica — fora do núcleo Q2)
 
@@ -411,7 +424,7 @@ Copie e preencha ao concluir cada fase:
 | 4 | 2026-06-23 | Bira | T4.1–T4.5, T4.7 (automatizados); T4.6 manual | `bash validate-maketests.sh` — 30/30 OK (T0–T4). Implementado: `maketests_ext/llm/` (contrato `GradingPayload`/`GradingResult`/`LLMProvider`, `provider_factory.py` com default `LLM_PROVIDER=mock` — sem credencial — , `response_validator.py`, `prompt_builder.py` + `prompts/somativo_v1.txt`); `MockProvider` (heurística de sobreposição de palavras-chave, só para testes); `GeminiProvider` (adapter real via `urllib` stdlib — sem SDK novo — com `responseSchema` nativo); stubs `openai`/`anthropic`/`maritaca`. `QuestionDissertative.doCorrection` agora chama `llm_grader.grade(...)` de verdade (banner mostra nota+parecer reais). `+python-dotenv` em requirements.txt; `.env` local (gitignored) e `.env.example` reescritos para o formato provider-agnostic. T4.6 (chamada real) virou `validate_fase4_live()`, fora do `main()` do script (custo/quota/rede) — confirmado manualmente: `gemini-2.5-flash` deu score=100 (resposta completa) e score=33 via pipeline OCR real (resposta parcial, rationale coerente com o que faltou). Achado: free tier do Gemini tem quota de só 20 req/dia por modelo — esgotada durante os testes; contornado com `run_params={"model": "gemini-2.5-flash-lite"}` (override por chamada, quota separada por modelo). Maritaca testada na sessão anterior: chave válida, sem crédito. |
 | 5 | 2026-06-23 | Bira | T5.1–T5.3, T5.5 (automatizados); T5.4 não implementado | `bash validate-maketests.sh` — 34/36 OK (T0–T5; T5.4 e T6.x ainda skip). Implementado: `maketests_ext/confidence_score.py` (`ConfidenceSignals`/`ConfidenceResult`/`compute`, função pura sem rede/LLM) agregando sinais de OCR (Fase 2: `confidence_mean`, `char_doubt_ratio`) e LLM (Fase 4: `review_recommended`, `rubric_coverage`, `error`) num score 0–100 + nível (alta/média/baixa) + `review_recommended` final. `QuestionDissertative.doCorrection` agora captura o dict completo do OCR (antes só usava `["text"]`) e mostra a confiança como 4ª linha do banner de feedback (`imgInfo` 120px→160px), sem alterar a nota sugerida. Decisão de design confirmada em T5.3: `review_recommended` final nunca é mais permissivo que o do LLM, mesmo quando o score numérico é "alta" — confiança alta com sinalização de revisão são coisas independentes. `score_stability_std` (estabilidade entre execuções, T5.4) ficou como hook reservado, não implementado — exigiria múltiplas chamadas reais ao LLM por resposta, custo desproporcional ao Q2; documentado explicitamente em vez de fingir cobertura. |
 | 6 | 2026-06-24 | Bira | T6.1–T6.6 (automatizados); T6.7/E2E-Q2 coberto pela combinação acima | `bash validate-maketests.sh` — 40/41 OK (T0–T6; T5.4 ainda skip). Implementado: `QuestionDissertative.doCorrection` popula `self.last_assist` (OCR, normalizado, `GradingResult`, confiança, timestamp); `Main.doCorrection` persiste/atualiza o sidecar `Correcao/<aluno>/<Q_N>_assist.json` (só para questões com `last_assist` — objetivas não geram sidecar, T6.6), preservando `status_hitl`/`manual_score` entre re-scans; novo `review_hitl.py` (CLI `list`/`accept`/`adjust`, reusa `Main`/`CorrectionManager` em vez de reimplementar parsing). Template `-e dissertative` (item 6.4) já existia desde a Fase 1, nenhum trabalho novo. Decisão de escopo: `notas.csv` central continua genérico, sem colunas HITL — esses campos vivem só no sidecar. T6.1–T6.6 estendem `tests/test_synthetic_answers.py` (mesmo cenário caro de T0.6/T1.8, evita duplicar setup); T6.7/E2E-Q2 considerado coberto por essa combinação automatizada, roteiro manual com papel físico fica complementar. **Bug real encontrado e corrigido:** `CorrectionManager.updateScores` misturava `str` (recarregado do CSV) e `int`/`float` (recém-atualizado) ao calcular `Nota_Final`, quebrando com `TypeError` — só aparecia ao reinstanciar `Main` sobre um `notas.csv` já existente (exatamente o que `review_hitl.py` sempre faz); corrigido normalizando para `float` no ponto de agregação. |
-| 7 | | | T7.1–T7.3 | |
+| 7 | 2026-06-23 | Bira | T7.1–T7.3 | `bash validate-maketests.sh` — 43/44 OK (T0–T7; T5.4 ainda skip). Implementado: corpus sintético `tests/fixtures/ocr_styles/` (3 frases PT × 3 estilos = 9 imagens); vendorizada a fonte cursiva Dancing Script (OFL, `google/fonts`) — não havia fonte cursiva instalada nem vendorizada antes; usuário escolheu baixar uma fonte OFL conhecida em vez de pular a categoria. Novo `experiments/ocr_styles_eval.py` reusa `ocr_extract.extract_text` (mesma extração da produção) + `jiwer` (`+jiwer` em requirements.txt) + `confidence_score.compute` (sinais LLM neutralizados, isola a contribuição do OCR). Resultado medido: CER médio forma=0,0063, cursiva=0,0172, misto=0,0524 — hipótese confirmada (cursiva > forma em CER) e o estilo "misto" (alternância de fonte palavra a palavra) teve o peor desempenho dos três, achado não previsto no guia original. Confiança da Fase 5 acompanha a mesma ordem (forma > cursiva > misto), suporte qualitativo ao seu uso como proxy de risco de OCR. |
 
 ---
 
