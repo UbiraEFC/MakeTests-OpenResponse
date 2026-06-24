@@ -248,28 +248,46 @@ tests/fixtures/ocr/
 
 ### Entregável
 
-- Sidecar `Correction/<aluno>/q<N>_assist.json`.
-- Colunas ou campos opcionais no CSV: `score_sugerido`, `confianca`, `status_hitl`.
-- Script `review_hitl.py` (CLI).
-- `./MakeTests.py -e dissertative` documentado.
-- **E2E-Q2** passando.
+- `QuestionDissertative.doCorrection` popula `self.last_assist` (OCR, normalizado, `GradingResult`, confiança, timestamp).
+- `Main.doCorrection` persiste/atualiza o sidecar `Correcao/<aluno>/<Q_N>_assist.json` para questões que produzem `last_assist` (hoje, só dissertativas — objetivas não geram sidecar); preserva `status_hitl`/`manual_score` entre re-scans.
+- `review_hitl.py` (CLI): `list [--all]`, `accept <aluno_dir> <questão>`, `adjust <aluno_dir> <questão> <nota>` — reaproveita `MakeTests.Main`/`CorrectionManager`, não reimplementa parsing de config/CSV.
+- `./MakeTests.py -e dissertative` — **já existia** antes desta fase (`MakeTests.py:2594`), nenhum trabalho novo.
+- **Decisão de escopo:** `notas.csv` central permanece genérico — sem colunas `score_sugerido`/`confianca`/`status_hitl`. Esses campos vivem só no sidecar (ensinar esses conceitos ao `CorrectionManager`, usado por todo tipo de questão, quebraria o desacoplamento). "Nota final ainda exige HITL" (T6.2) é garantido pelo `status_hitl="pendente"` no sidecar, não por um bloqueio no CSV — o `Q_N` já recebe a nota sugerida automaticamente, igual a qualquer outro tipo de questão.
+
+### Schema do sidecar (`<Q_N>_assist.json`)
+
+```json
+{
+  "ocr_text": "...", "normalized_text": "...",
+  "suggested_score": 8, "rationale": "...", "rubric_coverage": {},
+  "review_recommended": true, "error": null,
+  "provider_metadata": {"provider": "mock", "model": "keyword-overlap-v1"},
+  "confidence_score": 74, "confidence_level": "alta", "confidence_reasons": ["..."],
+  "inference_timestamp": "2026-06-24T00:22:46Z",
+  "question": "Q_2", "student": {"Matricula": "003", "Aluno": "Carlos Oliveira", "Email": "..."},
+  "status_hitl": "pendente|aceito|ajustado", "manual_score": null
+}
+```
+
+Sem `raw_response` (política de sanitização de provedor ainda não definida — Fase 4 §Governança) e sem `run_params` (nenhum caminho de produção define overrides hoje); campos ficam na raiz do JSON, sem sub-objeto `structured_result` separado.
 
 ### Testes
 
-| ID | Teste | Tipo | Critério de aceite |
-|----|-------|------|-------------------|
-| T6.1 | Sidecar criado | Integração | JSON com OCR, normalized, suggested_score, confidence, rationale |
-| T6.2 | CSV score sugerido | Integração | Coluna preenchida; nota final ainda exige HITL |
-| T6.3 | `review_hitl.py list` | CLI | Lista pendentes por confiança |
-| T6.4 | `review_hitl.py accept` | CLI | `status_hitl=aceito`; score consolidado |
-| T6.5 | `review_hitl.py adjust` | CLI | Nota manual sobrescreve sugestão |
-| T6.6 | Regressão objetivas | Smoke | Config mista obj+dissertativa funciona |
-| T6.7 | **E2E-Q2** | E2E | Ver abaixo |
+| ID | Teste | Tipo | Critério de aceite | Como roda |
+|----|-------|------|-------------------|-----------|
+| T6.1 | Sidecar criado | Integração | JSON com `ocr_text`/`normalized_text`/`suggested_score`/`confidence_score`/`rationale` | `tests/test_synthetic_answers.py` (via `validate_fase6()`) |
+| T6.2 | CSV score sugerido | Integração | `Q_N` preenchido no `notas.csv`; sidecar com `status_hitl=="pendente"` | idem |
+| T6.3 | `review_hitl.py list` | CLI (subprocess) | Lista o pendente, ordenado por confiança | idem |
+| T6.4 | `review_hitl.py accept` | CLI (subprocess) | `status_hitl="aceito"`; `notas.csv` mantém a nota sugerida | idem |
+| T6.5 | `review_hitl.py adjust` | CLI (subprocess) | `status_hitl="ajustado"`, `manual_score` gravado; `notas.csv` atualizado com a nota manual | idem |
+| T6.6 | Regressão objetivas | Smoke | Questão objetiva (Q_1) não gera sidecar; config mista continua passando T0.6 | idem |
+| T6.7 | **E2E-Q2** | E2E | Ver nota abaixo | coberto por T6.1–T6.6 |
 
 ### Evidência
 
-- Sidecar de exemplo anonimizado em `tests/fixtures/hitl/`.
-- CSV antes/depois de revisão HITL.
+`bash validate-maketests.sh` — 40/41 (T5.4 ainda skip), 0 falhas. T6.1–T6.6 rodam dentro do mesmo cenário caro já usado por T0.6/T1.8 (`tests/test_synthetic_answers.py`: gera prova com 1 objetiva + 1 dissertativa, pinta bolha real, escreve frase real, recompila LaTeX, rasteriza, corrige via `Main.readPDF`) — evita duplicar o setup, e cobre exatamente os 3 perfis de aluno necessários (resposta real, em branco, questão objetiva para regressão). **T6.7/E2E-Q2 é considerado coberto por essa combinação automatizada**; o roteiro manual com papel físico/scanner (seção "Entrega integrada" abaixo) fica como validação complementar opcional — mesma lógica já usada nas Fases 0/1 para T0.6/T1.8 (pipeline real sintético, não papel físico).
+
+**Bug real encontrado e corrigido:** `CorrectionManager.updateScores` (`MakeTests.py`) misturava tipos ao recalcular `Nota_Final` — pontuações recarregadas de um `notas.csv` existente chegam como `str` (via `csv.DictReader`), enquanto a pontuação recém-atualizada na mesma chamada chega como `int`/`float`; `final_calc`'s `sum([s*w for s,w in zip(scores,weights)])` quebrava com `TypeError` (`"100" * 1` é repetição de string, não multiplicação). Isso nunca aparecia num scan único de PDF (tudo fica `int` dentro do mesmo processo), mas `review_hitl.py` sempre parte de um `Main` recém-instanciado que recarrega o CSV do disco — expôs o bug imediatamente em T6.4/T6.5. Corrigido normalizando para `float` no ponto de agregação (`all_questions.append`), sem alterar o formato do CSV em disco.
 
 ---
 
@@ -392,7 +410,7 @@ Copie e preencha ao concluir cada fase:
 | 1 (reforço 2) | 2026-06-21 | Bira | T0.6, T1.8 (revalidados) | `bash validate-maketests.sh` — 24/24 OK. O teste de resposta real (linha anterior) revelou que a área dissertativa estava fisicamente pequena demais: A4/margem 1in/`width=.9\textwidth` davam só **~1,72mm entre linhas** (pauta normal é 6-8mm) — problema de espaço para escrita humana, não só de OCR. Aplicado: `QuestionDissertative.lines` 10→**6** e `answerAreaAspectRate()` 6/1→**2/1**, recalculado para ~**8,17mm/linha**; `convertPdfText2PdfImage.sh` `-density` 150→**300**. Resultado medido (escrevendo a mesma frase em 6 tamanhos de fonte numa única imagem e rodando o pipeline completo): antes precisava de fonte ~60px (~8,4mm) e ainda saía com ruído; depois, **12px (~1,7mm) já lê perfeitamente** — menor que escrita manuscrita normal (x-height tipicamente 3-5mm), com boa margem de segurança. Ressalva registrada no código: `ImageUtils.findAnswerAreas` (MakeTests.py) normaliza todo recorte para `IMAGE_WIDTH=1024px` antes do OCR — subir a densidade melhora o *downsample* mas não entrega mais pixels brutos além desse teto; se no futuro isso for insuficiente (letra real de aluno, não fonte sintética limpa), o próximo passo é subir `IMAGE_WIDTH` (mudança maior, usada em todo o sistema) ou migrar para um motor de HTR dedicado (TrOCR/Cloud Vision). Prova de teste passou de 3 para 4 páginas, esperado. |
 | 4 | 2026-06-23 | Bira | T4.1–T4.5, T4.7 (automatizados); T4.6 manual | `bash validate-maketests.sh` — 30/30 OK (T0–T4). Implementado: `maketests_ext/llm/` (contrato `GradingPayload`/`GradingResult`/`LLMProvider`, `provider_factory.py` com default `LLM_PROVIDER=mock` — sem credencial — , `response_validator.py`, `prompt_builder.py` + `prompts/somativo_v1.txt`); `MockProvider` (heurística de sobreposição de palavras-chave, só para testes); `GeminiProvider` (adapter real via `urllib` stdlib — sem SDK novo — com `responseSchema` nativo); stubs `openai`/`anthropic`/`maritaca`. `QuestionDissertative.doCorrection` agora chama `llm_grader.grade(...)` de verdade (banner mostra nota+parecer reais). `+python-dotenv` em requirements.txt; `.env` local (gitignored) e `.env.example` reescritos para o formato provider-agnostic. T4.6 (chamada real) virou `validate_fase4_live()`, fora do `main()` do script (custo/quota/rede) — confirmado manualmente: `gemini-2.5-flash` deu score=100 (resposta completa) e score=33 via pipeline OCR real (resposta parcial, rationale coerente com o que faltou). Achado: free tier do Gemini tem quota de só 20 req/dia por modelo — esgotada durante os testes; contornado com `run_params={"model": "gemini-2.5-flash-lite"}` (override por chamada, quota separada por modelo). Maritaca testada na sessão anterior: chave válida, sem crédito. |
 | 5 | 2026-06-23 | Bira | T5.1–T5.3, T5.5 (automatizados); T5.4 não implementado | `bash validate-maketests.sh` — 34/36 OK (T0–T5; T5.4 e T6.x ainda skip). Implementado: `maketests_ext/confidence_score.py` (`ConfidenceSignals`/`ConfidenceResult`/`compute`, função pura sem rede/LLM) agregando sinais de OCR (Fase 2: `confidence_mean`, `char_doubt_ratio`) e LLM (Fase 4: `review_recommended`, `rubric_coverage`, `error`) num score 0–100 + nível (alta/média/baixa) + `review_recommended` final. `QuestionDissertative.doCorrection` agora captura o dict completo do OCR (antes só usava `["text"]`) e mostra a confiança como 4ª linha do banner de feedback (`imgInfo` 120px→160px), sem alterar a nota sugerida. Decisão de design confirmada em T5.3: `review_recommended` final nunca é mais permissivo que o do LLM, mesmo quando o score numérico é "alta" — confiança alta com sinalização de revisão são coisas independentes. `score_stability_std` (estabilidade entre execuções, T5.4) ficou como hook reservado, não implementado — exigiria múltiplas chamadas reais ao LLM por resposta, custo desproporcional ao Q2; documentado explicitamente em vez de fingir cobertura. |
-| 6 | | | T6.1–T6.7, E2E-Q2 | |
+| 6 | 2026-06-24 | Bira | T6.1–T6.6 (automatizados); T6.7/E2E-Q2 coberto pela combinação acima | `bash validate-maketests.sh` — 40/41 OK (T0–T6; T5.4 ainda skip). Implementado: `QuestionDissertative.doCorrection` popula `self.last_assist` (OCR, normalizado, `GradingResult`, confiança, timestamp); `Main.doCorrection` persiste/atualiza o sidecar `Correcao/<aluno>/<Q_N>_assist.json` (só para questões com `last_assist` — objetivas não geram sidecar, T6.6), preservando `status_hitl`/`manual_score` entre re-scans; novo `review_hitl.py` (CLI `list`/`accept`/`adjust`, reusa `Main`/`CorrectionManager` em vez de reimplementar parsing). Template `-e dissertative` (item 6.4) já existia desde a Fase 1, nenhum trabalho novo. Decisão de escopo: `notas.csv` central continua genérico, sem colunas HITL — esses campos vivem só no sidecar. T6.1–T6.6 estendem `tests/test_synthetic_answers.py` (mesmo cenário caro de T0.6/T1.8, evita duplicar setup); T6.7/E2E-Q2 considerado coberto por essa combinação automatizada, roteiro manual com papel físico fica complementar. **Bug real encontrado e corrigido:** `CorrectionManager.updateScores` misturava `str` (recarregado do CSV) e `int`/`float` (recém-atualizado) ao calcular `Nota_Final`, quebrando com `TypeError` — só aparecia ao reinstanciar `Main` sobre um `notas.csv` já existente (exatamente o que `review_hitl.py` sempre faz); corrigido normalizando para `float` no ponto de agregação. |
 | 7 | | | T7.1–T7.3 | |
 
 ---

@@ -13,6 +13,7 @@ Uso: python3 tests/test_synthetic_answers.py
 Assume cwd = MakeTests/ (raiz do repo, onde este script eh chamado por
 validate-maketests.sh).
 """
+import json
 import os
 import re
 import shutil
@@ -171,6 +172,56 @@ def main():
     blank = [c for c in ocr_banners if c == "OCR (raw): "]
     ok_t18 = len(non_trivial) == 2 and len(blank) == 1
     print("T1.8", "OK" if ok_t18 else "FAIL ocr_banners={}".format(ocr_banners))
+
+    # Fase 6 - sidecar HITL (q2_assist.json) + review_hitl.py
+    joao_dir = os.path.join(test_quick_abs, "Correcao", "João da Silva")
+    carlos_dir = os.path.join(test_quick_abs, "Correcao", "Carlos Oliveira")
+    joao_sidecar_path = os.path.join(joao_dir, "Q_2_assist.json")
+    carlos_sidecar_path = os.path.join(carlos_dir, "Q_2_assist.json")
+
+    # T6.1 - sidecar criado com OCR, normalizado, nota sugerida, confianca e parecer
+    try:
+        joao_sidecar = json.load(open(joao_sidecar_path))
+        ok_t61 = (joao_sidecar.get("ocr_text") and joao_sidecar.get("normalized_text")
+                  and isinstance(joao_sidecar.get("suggested_score"), (int, float))
+                  and joao_sidecar.get("confidence_score") is not None
+                  and joao_sidecar.get("rationale") is not None)
+    except Exception as e:
+        ok_t61, joao_sidecar = False, {}
+        print("T6.1 erro:", e)
+    print("T6.1", "OK" if ok_t61 else "FAIL sidecar={}".format(joao_sidecar))
+
+    # T6.2 - notas.csv ja tem Q_2 preenchido (nota sugerida), mas sidecar ainda pendente
+    q2_joao_csv = {row[1]: row[4] for row in rows}.get("João da Silva")
+    ok_t62 = (q2_joao_csv is not None and q2_joao_csv != ""
+              and joao_sidecar.get("status_hitl") == "pendente")
+    print("T6.2", "OK" if ok_t62 else "FAIL Q_2={} status_hitl={}".format(q2_joao_csv, joao_sidecar.get("status_hitl")))
+
+    # T6.6 - regressao: questao objetiva (Q_1) nao gera sidecar
+    ok_t66 = not os.path.exists(os.path.join(joao_dir, "Q_1_assist.json"))
+    print("T6.6", "OK" if ok_t66 else "FAIL Q_1_assist.json nao deveria existir")
+
+    # T6.3 - review_hitl.py list mostra o pendente do Joao
+    r = run("python3 ../review_hitl.py list", cwd=test_quick_abs)
+    ok_t63 = "João da Silva" in r.stdout and "pendente" in r.stdout
+    print("T6.3", "OK" if ok_t63 else "FAIL stdout={}".format(r.stdout))
+
+    # T6.4 - review_hitl.py accept confirma a nota sugerida do Joao
+    r = run('python3 ../review_hitl.py accept "João da Silva" 2', cwd=test_quick_abs)
+    joao_sidecar_after = json.load(open(joao_sidecar_path)) if os.path.exists(joao_sidecar_path) else {}
+    ok_t64 = r.returncode == 0 and joao_sidecar_after.get("status_hitl") == "aceito"
+    print("T6.4", "OK" if ok_t64 else "FAIL rc={} sidecar={}".format(r.returncode, joao_sidecar_after))
+
+    # T6.5 - review_hitl.py adjust sobrescreve a nota sugerida do Carlos
+    r = run('python3 ../review_hitl.py adjust "Carlos Oliveira" 2 70', cwd=test_quick_abs)
+    carlos_sidecar_after = json.load(open(carlos_sidecar_path)) if os.path.exists(carlos_sidecar_path) else {}
+    notas_after = open(notas_path).read()
+    rows_after = [line.split(";") for line in notas_after.strip().splitlines()[1:]]
+    q2_carlos_csv_after = {row[1]: row[4] for row in rows_after}.get("Carlos Oliveira")
+    ok_t65 = (r.returncode == 0 and carlos_sidecar_after.get("status_hitl") == "ajustado"
+              and carlos_sidecar_after.get("manual_score") == 70.0
+              and q2_carlos_csv_after == "70.0")
+    print("T6.5", "OK" if ok_t65 else "FAIL rc={} sidecar={} Q_2={}".format(r.returncode, carlos_sidecar_after, q2_carlos_csv_after))
 
     run("rm -rf {0} Prova_Capital_SP_img.pdf".format(DEBUG_DIR), cwd=test_quick_abs)
 

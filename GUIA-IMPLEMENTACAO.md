@@ -361,10 +361,10 @@ O núcleo do MakeTests (Fase 5, Fase 6, `QuestionDissertative`) não depende de 
 
 | # | Descrição |
 |---|-----------|
-| 6.1 | Sidecar `Correction/<aluno>/q<N>_assist.json` com score sugerido, confiança, parecer, texto OCR, **e os campos de proveniência do provedor** (`provider`, `model`, `prompt_version`, `inference_timestamp` — ver Fase 4 §Persistência e auditoria) |
-| 6.2 | CSV: manter coluna de score **consolidado**; opcional colunas `score_sugerido`, `confianca`, `status_hitl` (`pendente`/`aceito`/`ajustado`) |
-| 6.3 | Script `review_hitl.py` (CLI): listar pendentes de baixa confiança; professor informa nota final |
-| 6.4 | Template `-e dissertative` em `MakeTests.py` (como `-e ocr`, `-e essay`) |
+| 6.1 | **Implementado.** Sidecar `Correcao/<aluno>/<Q_N>_assist.json` com score sugerido, confiança, parecer, texto OCR, e os campos de proveniência do provedor (`provider`, `model`, `prompt_version`, `inference_timestamp` — ver Fase 4 §Persistência e auditoria); preserva `status_hitl`/`manual_score` entre re-scans. `QuestionDissertative.doCorrection` popula `self.last_assist`; `Main.doCorrection` grava o sidecar. |
+| 6.2 | **Implementado, com escopo reduzido por design.** CSV central (`notas.csv`) continua genérico, sem colunas `score_sugerido`/`confianca`/`status_hitl` — esses campos vivem só no sidecar (ensinar `CorrectionManager`, usado por qualquer tipo de questão, a conceitos exclusivos de dissertativas quebraria o desacoplamento). `Q_N` já recebe a nota sugerida automaticamente; `status_hitl="pendente"` no sidecar é quem sinaliza que falta HITL. |
+| 6.3 | **Implementado.** `review_hitl.py` (CLI): `list [--all]`, `accept <aluno_dir> <questão>`, `adjust <aluno_dir> <questão> <nota>` — reaproveita `MakeTests.Main`/`CorrectionManager`. |
+| 6.4 | **Já existia** desde a Fase 1 (`MakeTests.py:2594`, `examples['dissertative']`) — nenhum trabalho novo nesta fase. |
 
 **Interface mínima Q2:** CLI interativa (sem GUI web na v1).
 

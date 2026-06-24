@@ -512,7 +512,22 @@ validate_fase6() {
         skip "T6.x / E2E-Q2" "review_hitl.py ainda não existe"
         return
     fi
-    skip "T6.x / E2E-Q2" "review_hitl.py existe, mas validate_fase6() ainda não foi escrita"
+    if [ ! -f /tmp/validate_synthetic_answers.log ]; then
+        skip "T6.x / E2E-Q2" "validate_synthetic_answers() não rodou nesta execução"
+        return
+    fi
+
+    # As asserções T6.x rodam dentro de tests/test_synthetic_answers.py (mesmo
+    # cenário caro de gerar->recortar->corrigir já usado por T0.6/T1.8) - aqui
+    # só lemos o log já produzido por validate_synthetic_answers(), sem repetir
+    # a geração/correção completa.
+    grep -q "^T6.1 OK" /tmp/validate_synthetic_answers.log; check "T6.1" "Sidecar criado (OCR, normalizado, nota sugerida, confiança, parecer)" $?
+    grep -q "^T6.2 OK" /tmp/validate_synthetic_answers.log; check "T6.2" "notas.csv com nota sugerida; sidecar ainda status_hitl=pendente" $?
+    grep -q "^T6.3 OK" /tmp/validate_synthetic_answers.log; check "T6.3" "review_hitl.py list mostra pendente" $?
+    grep -q "^T6.4 OK" /tmp/validate_synthetic_answers.log; check "T6.4" "review_hitl.py accept confirma nota sugerida" $?
+    grep -q "^T6.5 OK" /tmp/validate_synthetic_answers.log; check "T6.5" "review_hitl.py adjust sobrescreve nota com valor manual" $?
+    grep -q "^T6.6 OK" /tmp/validate_synthetic_answers.log; check "T6.6" "Regressão: questão objetiva não gera sidecar" $?
+    echo "ℹ️  T6.7/E2E-Q2: coberto pela combinação T6.1-T6.6 acima (pipeline real sintético); roteiro manual com papel físico/scanner em PLANO-TESTES-VALIDACAO.md é validação complementar, não bloqueia a fase."
 }
 
 ################################################################################
@@ -521,7 +536,9 @@ validate_fase6() {
 # T0.6/T1.8 — ver tests/test_synthetic_answers.py para o passo a passo.
 ################################################################################
 validate_synthetic_answers() {
-    (cd "$MAKETESTS_DIR" && python3 tests/test_synthetic_answers.py) > /tmp/validate_synthetic_answers.log 2>&1
+    # LLM_PROVIDER=mock: desde a Fase 4, doCorrection chama o LLM de verdade;
+    # sem isso, este teste dependeria de rede/credencial/quota real (ver T6.4).
+    (cd "$MAKETESTS_DIR" && LLM_PROVIDER=mock python3 tests/test_synthetic_answers.py) > /tmp/validate_synthetic_answers.log 2>&1
 
     grep -q "^T0.6 OK" /tmp/validate_synthetic_answers.log
     check "T0.6" "Múltipla escolha end-to-end com resposta real (não em branco)" $?
