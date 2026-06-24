@@ -5,9 +5,15 @@ respostas sinteticas reais nas duas areas (multipla escolha e dissertativa).
 Mistura corretos e em branco, igual ao experimento manual da Fase 0, mas
 agora cobrindo tambem a area dissertativa e de forma reproduzivel:
 
-  Joao   -> bolha certa (Q1) + escreve a frase na dissertativa (Q2)
+  Joao   -> bolha certa (Q1) + escreve a frase na dissertativa em letra de
+            forma (Q2)
   Maria  -> bolha certa (Q1); dissertativa em branco (controle)
-  Carlos -> bolha em branco (controle); escreve a frase na dissertativa (Q2)
+  Carlos -> bolha em branco (controle); escreve a frase na dissertativa em
+            cursiva (Q2)
+
+Dois estilos de escrita (nao o mesmo duas vezes) para que o pipeline real
+(nao so o experimento isolado da Fase 7) seja exercitado contra a variacao
+de estilo que a Fase 7 mostrou afetar o OCR.
 
 Uso: python3 tests/test_synthetic_answers.py
 Assume cwd = MakeTests/ (raiz do repo, onde este script eh chamado por
@@ -26,6 +32,7 @@ from PIL import Image, ImageDraw, ImageFont
 TEST_QUICK = "test-quick"
 DEBUG_DIR = "synth_debug"
 FONT_PATH = os.path.abspath("tests/fixtures/ocr/fonts/PatrickHand-Regular.ttf")
+CURSIVA_FONT_PATH = os.path.abspath("tests/fixtures/ocr/fonts/DancingScript-Regular.ttf")
 PHRASE = "A LUZ VIRA ENERGIA"
 
 # Geometria das areas de resposta (validada manualmente nas Fases 0/1)
@@ -56,7 +63,7 @@ def paint_bubble(png_path, row):
     cv2.imwrite(png_path, img)
 
 
-def write_handwritten_text(png_path, text):
+def write_handwritten_text(png_path, text, font_path=FONT_PATH):
     # Com a área redimensionada (lines=6, aspectrate=2/1) e a rasterização a
     # 300dpi, o limite de legibilidade caiu de ~60px (~8,4mm, ainda com
     # ruído) para ~12px (~1,7mm, leitura limpa) - testado empiricamente
@@ -64,7 +71,7 @@ def write_handwritten_text(png_path, text):
     # dentro da faixa de escrita manuscrita normal, com folga de segurança.
     img = Image.open(png_path).convert("RGB")
     draw = ImageDraw.Draw(img)
-    font = ImageFont.truetype(FONT_PATH, 36)
+    font = ImageFont.truetype(font_path, 36)
     y = BORDER + HEADER_HEIGHT + PADDING + 15
     draw.text((BORDER + 30, y), text, font=font, fill=(0, 0, 0))
     img.save(png_path)
@@ -109,11 +116,13 @@ def main():
     source_tex = os.path.join(answer_dir, "source.tex")
     correct_rows = find_correct_rows(source_tex)  # [joao, maria, carlos]
 
-    # 2) Aplicar tratamentos (ver docstring do módulo)
+    # 2) Aplicar tratamentos (ver docstring do módulo) - Joao em letra de
+    # forma, Carlos em cursiva: cobre os dois estilos que a Fase 7 mostrou
+    # terem CER diferentes, em vez de testar o mesmo estilo duas vezes.
     paint_bubble(os.path.join(answer_dir, "AnswerArea-0.png"), correct_rows[0])
-    write_handwritten_text(os.path.join(answer_dir, "AnswerArea-1.png"), PHRASE)
+    write_handwritten_text(os.path.join(answer_dir, "AnswerArea-1.png"), PHRASE, font_path=FONT_PATH)
     paint_bubble(os.path.join(answer_dir, "AnswerArea-2.png"), correct_rows[1])
-    write_handwritten_text(os.path.join(answer_dir, "AnswerArea-5.png"), PHRASE)
+    write_handwritten_text(os.path.join(answer_dir, "AnswerArea-5.png"), PHRASE, font_path=CURSIVA_FONT_PATH)
 
     # 3) Recompilar pdflatex com as imagens já modificadas
     r = run("pdflatex -interaction=nonstopmode source.tex", cwd=answer_dir)

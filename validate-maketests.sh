@@ -531,6 +531,23 @@ validate_fase6() {
 }
 
 ################################################################################
+# Fase 7 — Experimento OCR por estilo de escrita (exploratório, não bloqueia
+# o núcleo Q2 — ver experiments/ocr_styles_eval.py)
+################################################################################
+validate_fase7() {
+    if [ ! -f "$MAKETESTS_DIR/experiments/ocr_styles_eval.py" ]; then
+        skip "T7.x" "experiments/ocr_styles_eval.py ainda não existe"
+        return
+    fi
+
+    (cd "$MAKETESTS_DIR" && python3 experiments/ocr_styles_eval.py) > /tmp/validate_fase7.log 2>&1
+
+    grep -q "^T7.1 OK" /tmp/validate_fase7.log; check "T7.1" "Corpus com >=9 imagens, >=3 por estilo" $?
+    grep -q "^T7.2 OK" /tmp/validate_fase7.log; check "T7.2" "CSV de resultados (CER/WER por imagem) escrito" $?
+    grep -q "^T7.3 OK" /tmp/validate_fase7.log; check "T7.3" "Correlação qualitativa cursiva vs. letra de forma (CER), documentada" $?
+}
+
+################################################################################
 # Teste de integração robusto: pipeline completo com respostas sintéticas
 # reais (não em branco) tanto na múltipla escolha quanto na dissertativa.
 # T0.6/T1.8 — ver tests/test_synthetic_answers.py para o passo a passo.
@@ -564,6 +581,7 @@ validate_fase3
 validate_fase4
 validate_fase5
 validate_fase6
+validate_fase7
 
 echo ""
 echo "------------------------------------------------"
