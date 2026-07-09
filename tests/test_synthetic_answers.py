@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Teste de integracao: pipeline completo (gerar -> recortar -> corrigir) com
+"""Teste de integracao: pipeline completo (gerar -> responder -> corrigir) com
 respostas sinteticas reais nas duas areas (multipla escolha e dissertativa).
 
-Mistura corretos e em branco, igual ao experimento manual da Fase 0, mas
-agora cobrindo tambem a area dissertativa e de forma reproduzivel:
+Roda numa COPIA isolada de test-quick, com Students.csv proprio de 3 alunos —
+test-quick/ em si e a fixture de demonstracao ao vivo (GUIA-TESTE-AO-VIVO.md)
+e pode ser editada livremente (tema, alunos, nomes de PDF) sem quebrar esta
+suite. Tudo que depende do tema e derivado do config.json da fixture.
+
+Tratamentos (mistura corretos e em branco, igual ao experimento da Fase 0):
 
   Joao   -> bolha certa (Q1) + escreve a frase na dissertativa em letra de
             forma (Q2)
@@ -15,84 +19,39 @@ Dois estilos de escrita (nao o mesmo duas vezes) para que o pipeline real
 (nao so o experimento isolado da Fase 7) seja exercitado contra a variacao
 de estilo que a Fase 7 mostrou afetar o OCR.
 
-Uso: python3 tests/test_synthetic_answers.py
+A aplicacao das respostas reusa gerar_prova_respondida.py (mesma ferramenta
+da Etapa 1.5 do guia): pintar bolha, escrever com fonte de mao, recompilar o
+LaTeX e rasterizar — em vez de duplicar essa logica aqui.
+
+Uso: LLM_PROVIDER=mock python3 tests/test_synthetic_answers.py
 Assume cwd = MakeTests/ (raiz do repo, onde este script eh chamado por
 validate-maketests.sh).
 """
+import csv
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
-import cv2
-from PIL import Image, ImageDraw, ImageFont
-
-TEST_QUICK = "test-quick"
-DEBUG_DIR = "synth_debug"
-FONT_PATH = os.path.abspath("tests/fixtures/ocr/fonts/PatrickHand-Regular.ttf")
-CURSIVA_FONT_PATH = os.path.abspath("tests/fixtures/ocr/fonts/DancingScript-Regular.ttf")
 PHRASE = "A LUZ VIRA ENERGIA"
 
-# Geometria das areas de resposta (validada manualmente nas Fases 0/1)
-WIDTH = 1024
-HEADER_HEIGHT = 45
-BORDER = 2
-MARKER_RADIUS = HEADER_HEIGHT // 2
-PADDING = MARKER_RADIUS
+STUDENTS_CSV = """%ID%;%NAME%;%EMAIL%
+001;"João da Silva";"joao@example.com"
+002;"Maria Santos";"maria@example.com"
+003;"Carlos Oliveira";"carlos@example.com"
+"""
 
-
-def mc_bubble_center(row):
-    aspectrate = 32 / (4 + 1)
-    ans_h = int(WIDTH / aspectrate)
-    cell_w = WIDTH / 2
-    cell_h = ans_h / 5
-    cx = BORDER + cell_w / 2
-    cy = BORDER + HEADER_HEIGHT + PADDING + (1 + row) * cell_h + cell_h / 2
-    rad = int(min(cell_w, cell_h) // 3)
-    if rad > WIDTH / 80:
-        rad = int(WIDTH / 80)
-    return int(cx), int(cy), rad
-
-
-def paint_bubble(png_path, row):
-    img = cv2.imread(png_path)
-    cx, cy, rad = mc_bubble_center(row)
-    cv2.circle(img, (cx, cy), rad, (0, 0, 0), thickness=-1)
-    cv2.imwrite(png_path, img)
-
-
-def write_handwritten_text(png_path, text, font_path=FONT_PATH):
-    # Com a área redimensionada (lines=6, aspectrate=2/1) e a rasterização a
-    # 300dpi, o limite de legibilidade caiu de ~60px (~8,4mm, ainda com
-    # ruído) para ~12px (~1,7mm, leitura limpa) - testado empiricamente
-    # variando o tamanho linha a linha. 36px (~5mm) fica confortavelmente
-    # dentro da faixa de escrita manuscrita normal, com folga de segurança.
-    img = Image.open(png_path).convert("RGB")
-    draw = ImageDraw.Draw(img)
-    font = ImageFont.truetype(font_path, 36)
-    y = BORDER + HEADER_HEIGHT + PADDING + 15
-    draw.text((BORDER + 30, y), text, font=font, fill=(0, 0, 0))
-    img.save(png_path)
-
-
-def find_correct_rows(source_tex_path):
-    text = open(source_tex_path).read()
-    blocks = re.split(r"Nome: ", text)[1:]
-    rows = []
-    for b in blocks:
-        m = re.search(
-            r"\\begin\{multicols\}\{2\}\\begin\{enumerate\}.*?\]\\item (.*?)\\end\{enumerate\}\\end\{multicols\}",
-            b, re.S)
-        alts = [a.strip() for a in re.split(r"\\item ", m.group(1)) if a.strip()]
-        rows.append([i for i, a in enumerate(alts) if "São Paulo" in a][0])
-    return rows
+RESPOSTAS = {
+    "João da Silva": {"Q1": "correta", "Q2": {"texto": PHRASE, "estilo": "forma"}},
+    "Maria Santos": {"Q1": "correta", "Q2": "branco"},
+    "Carlos Oliveira": {"Q1": "branco", "Q2": {"texto": PHRASE, "estilo": "cursiva"}},
+}
 
 
 def run(cmd, cwd=None):
-    r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
-    return r
+    return subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
 
 
 def fail(msg, r=None):
@@ -104,47 +63,41 @@ def fail(msg, r=None):
 
 
 def main():
-    # 1) Regenerar com -t para ter os PNGs persistentes
-    run('rm -rf {0} *.pdf Prova_Capital_SP_img.pdf Correcao/notas.csv '
-        '"Correcao/João da Silva" "Correcao/Maria Santos" "Correcao/Carlos Oliveira"'
-        .format(DEBUG_DIR), cwd=TEST_QUICK)
-    r = run("python3 ../MakeTests.py -v -t {0}".format(DEBUG_DIR), cwd=TEST_QUICK)
+    root = os.getcwd()
+    fixture = tempfile.mkdtemp(prefix="synth_fixture_")
+    try:
+        run_tests(root, fixture)
+    finally:
+        shutil.rmtree(fixture, ignore_errors=True)
+
+
+def run_tests(root, fixture):
+    src = os.path.join(root, "test-quick")
+
+    # 1) Fixture isolada: copia de test-quick (sem artefatos gerados), com
+    #    Students.csv e respostas.json proprios
+    cfg = json.load(open(os.path.join(src, "config.json"), encoding="utf-8"))
+    shutil.rmtree(fixture)
+    shutil.copytree(src, fixture,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pdf", "Correcao",
+                                                  "gerar_prova_respondida_tmp", "latex_debug"))
+    with open(os.path.join(fixture, cfg["input"]["filename"]), "w", encoding="utf-8") as f:
+        f.write(STUDENTS_CSV)
+    with open(os.path.join(fixture, "respostas.json"), "w", encoding="utf-8") as f:
+        json.dump(RESPOSTAS, f, ensure_ascii=False, indent=2)
+
+    stem, ext = os.path.splitext(cfg["output"]["tests"])
+    answered_img = os.path.join(fixture, stem + "_respondida_img" + ext)
+
+    # 2) Gerar prova respondida sintetica (bolhas + texto + recompilar + rasterizar)
+    r = run('python3 "{0}" --dir "{1}"'.format(
+        os.path.join(root, "gerar_prova_respondida.py"), fixture), cwd=root)
     if r.returncode != 0:
-        fail("geração inicial falhou", r)
+        fail("gerar_prova_respondida.py falhou", r)
 
-    answer_dir = os.path.join(TEST_QUICK, DEBUG_DIR, "Tests")
-    source_tex = os.path.join(answer_dir, "source.tex")
-    correct_rows = find_correct_rows(source_tex)  # [joao, maria, carlos]
-
-    # 2) Aplicar tratamentos (ver docstring do módulo) - Joao em letra de
-    # forma, Carlos em cursiva: cobre os dois estilos que a Fase 7 mostrou
-    # terem CER diferentes, em vez de testar o mesmo estilo duas vezes.
-    paint_bubble(os.path.join(answer_dir, "AnswerArea-0.png"), correct_rows[0])
-    write_handwritten_text(os.path.join(answer_dir, "AnswerArea-1.png"), PHRASE, font_path=FONT_PATH)
-    paint_bubble(os.path.join(answer_dir, "AnswerArea-2.png"), correct_rows[1])
-    write_handwritten_text(os.path.join(answer_dir, "AnswerArea-5.png"), PHRASE, font_path=CURSIVA_FONT_PATH)
-
-    # 3) Recompilar pdflatex com as imagens já modificadas
-    r = run("pdflatex -interaction=nonstopmode source.tex", cwd=answer_dir)
-    if "Output written" not in r.stdout:
-        fail("pdflatex não gerou o PDF", r)
-
-    # 4) Copiar, rasterizar (simula prova escaneada)
-    shutil.copy(os.path.join(answer_dir, "source.pdf"),
-                os.path.join(TEST_QUICK, "Prova_Capital_SP.pdf"))
-    r = run("bash ../convertPdfText2PdfImage.sh Prova_Capital_SP.pdf", cwd=TEST_QUICK)
-    if r.returncode != 0:
-        fail("conversão para imagem falhou", r)
-
-    # 5) Corrigir com espião no banner de feedback (mesmo padrão de T2.4/T3.4)
-    # Main.__init__ muda o cwd para a pasta do config_file; resolvemos os
-    # caminhos para absolutos antes disso.
-    notas_path = os.path.abspath(os.path.join(TEST_QUICK, "Correcao", "notas.csv"))
-    config_path = os.path.abspath(os.path.join(TEST_QUICK, "config.json"))
-    pdf_path = os.path.abspath(os.path.join(TEST_QUICK, "Prova_Capital_SP_img.pdf"))
-    test_quick_abs = os.path.abspath(TEST_QUICK)
-
-    sys.path.insert(0, os.getcwd())
+    # 3) Corrigir com espiao no banner de feedback (mesmo padrao de T2.4/T3.4).
+    # Main.__init__ muda o cwd para a pasta do config_file; caminhos absolutos.
+    sys.path.insert(0, root)
     import MakeTests as MT
     captured = []
     original = MT.ImageUtils.drawTextInsideTheBox
@@ -155,16 +108,28 @@ def main():
 
     MT.ImageUtils.drawTextInsideTheBox = spy
     try:
-        m = MT.Main(config_file=config_path,
+        m = MT.Main(config_file=os.path.join(fixture, "config.json"),
                     config_default=MT.examples["config"], verbose=3, temp_dir=None)
-        m.readPDF(pdf_path)
+        m.readPDF(answered_img)
     finally:
         MT.ImageUtils.drawTextInsideTheBox = original
 
+    # Nomes de colunas/arquivos do CSV de notas, derivados do config
+    corr = cfg["correction"]
+    notas_path = os.path.join(fixture, corr["path"], corr["csv_file"])
+    name_col = corr["headers"]["identification"]["%NAME%"]
+
+    def q_col(n):
+        return corr["headers"]["intermediate"].replace(corr["headers"]["counter"], str(n))
+
+    def read_notas():
+        with open(notas_path, encoding="utf-8") as f:
+            reader = csv.DictReader(f, delimiter=corr["delimiter"], quotechar=corr["quotechar"])
+            return {row[name_col]: row for row in reader}
+
     # T0.6 — multipla escolha, end-to-end com resposta real
-    notas = open(notas_path).read()
-    rows = [line.split(";") for line in notas.strip().splitlines()[1:]]
-    scores_q1 = {row[1]: row[3] for row in rows}
+    notas = read_notas()
+    scores_q1 = {nome: row[q_col(1)] for nome, row in notas.items()}
     ok_t06 = (scores_q1.get("João da Silva") == "100"
               and scores_q1.get("Maria Santos") == "100"
               and scores_q1.get("Carlos Oliveira") == "0")
@@ -182,9 +147,10 @@ def main():
     ok_t18 = len(non_trivial) == 2 and len(blank) == 1
     print("T1.8", "OK" if ok_t18 else "FAIL ocr_banners={}".format(ocr_banners))
 
-    # Fase 6 - sidecar HITL (q2_assist.json) + review_hitl.py
-    joao_dir = os.path.join(test_quick_abs, "Correcao", "João da Silva")
-    carlos_dir = os.path.join(test_quick_abs, "Correcao", "Carlos Oliveira")
+    # Fase 6 - sidecar HITL (Q_2_assist.json) + review_hitl.py
+    review_py = os.path.join(root, "review_hitl.py")
+    joao_dir = os.path.join(fixture, corr["path"], "João da Silva")
+    carlos_dir = os.path.join(fixture, corr["path"], "Carlos Oliveira")
     joao_sidecar_path = os.path.join(joao_dir, "Q_2_assist.json")
     carlos_sidecar_path = os.path.join(carlos_dir, "Q_2_assist.json")
 
@@ -201,7 +167,7 @@ def main():
     print("T6.1", "OK" if ok_t61 else "FAIL sidecar={}".format(joao_sidecar))
 
     # T6.2 - notas.csv ja tem Q_2 preenchido (nota sugerida), mas sidecar ainda pendente
-    q2_joao_csv = {row[1]: row[4] for row in rows}.get("João da Silva")
+    q2_joao_csv = notas.get("João da Silva", {}).get(q_col(2))
     ok_t62 = (q2_joao_csv is not None and q2_joao_csv != ""
               and joao_sidecar.get("status_hitl") == "pendente")
     print("T6.2", "OK" if ok_t62 else "FAIL Q_2={} status_hitl={}".format(q2_joao_csv, joao_sidecar.get("status_hitl")))
@@ -211,28 +177,24 @@ def main():
     print("T6.6", "OK" if ok_t66 else "FAIL Q_1_assist.json nao deveria existir")
 
     # T6.3 - review_hitl.py list mostra o pendente do Joao
-    r = run("python3 ../review_hitl.py list", cwd=test_quick_abs)
+    r = run('python3 "{0}" list'.format(review_py), cwd=fixture)
     ok_t63 = "João da Silva" in r.stdout and "pendente" in r.stdout
     print("T6.3", "OK" if ok_t63 else "FAIL stdout={}".format(r.stdout))
 
     # T6.4 - review_hitl.py accept confirma a nota sugerida do Joao
-    r = run('python3 ../review_hitl.py accept "João da Silva" 2', cwd=test_quick_abs)
+    r = run('python3 "{0}" accept "João da Silva" 2'.format(review_py), cwd=fixture)
     joao_sidecar_after = json.load(open(joao_sidecar_path)) if os.path.exists(joao_sidecar_path) else {}
     ok_t64 = r.returncode == 0 and joao_sidecar_after.get("status_hitl") == "aceito"
     print("T6.4", "OK" if ok_t64 else "FAIL rc={} sidecar={}".format(r.returncode, joao_sidecar_after))
 
     # T6.5 - review_hitl.py adjust sobrescreve a nota sugerida do Carlos
-    r = run('python3 ../review_hitl.py adjust "Carlos Oliveira" 2 70', cwd=test_quick_abs)
+    r = run('python3 "{0}" adjust "Carlos Oliveira" 2 70'.format(review_py), cwd=fixture)
     carlos_sidecar_after = json.load(open(carlos_sidecar_path)) if os.path.exists(carlos_sidecar_path) else {}
-    notas_after = open(notas_path).read()
-    rows_after = [line.split(";") for line in notas_after.strip().splitlines()[1:]]
-    q2_carlos_csv_after = {row[1]: row[4] for row in rows_after}.get("Carlos Oliveira")
+    q2_carlos_csv_after = read_notas().get("Carlos Oliveira", {}).get(q_col(2))
     ok_t65 = (r.returncode == 0 and carlos_sidecar_after.get("status_hitl") == "ajustado"
               and carlos_sidecar_after.get("manual_score") == 70.0
               and q2_carlos_csv_after == "70.0")
     print("T6.5", "OK" if ok_t65 else "FAIL rc={} sidecar={} Q_2={}".format(r.returncode, carlos_sidecar_after, q2_carlos_csv_after))
-
-    run("rm -rf {0} Prova_Capital_SP_img.pdf".format(DEBUG_DIR), cwd=test_quick_abs)
 
 
 if __name__ == "__main__":

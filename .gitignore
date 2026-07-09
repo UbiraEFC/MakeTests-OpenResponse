@@ -8,3 +8,8 @@ __pycache__/
 test-quick/*.pdf
 test-quick/Correcao/
 test-quick/latex_debug/
+
+# Diretórios temporários de depuração (normalmente removidos ao fim de cada
+# execução; sobram apenas se o script for interrompido no meio)
+test-quick/gerar_prova_respondida_tmp/
+test-quick/synth_debug/

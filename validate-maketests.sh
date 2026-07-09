@@ -26,6 +26,16 @@ TEST_DIR="$MAKETESTS_DIR/test-quick"
 MAKETESTS_PY="$MAKETESTS_DIR/MakeTests.py"
 CONVERT_SH="$MAKETESTS_DIR/convertPdfText2PdfImage.sh"
 
+# Tudo que depende do tema da prova é derivado da própria fixture (config.json
+# e Students.csv) — trocar o tema/alunos em test-quick/ não exige editar este
+# script. (Assume nomes de PDF sem espaços.)
+read -r TESTS_PDF GABARITO_PDF NUM_STUDENTS NUM_QUESTIONS <<< "$(cd "$TEST_DIR" && python3 -c "
+import json, csv
+cfg = json.load(open('config.json'))
+n = sum(1 for _ in csv.reader(open(cfg['input']['filename']), delimiter=cfg['input']['delimiter'])) - 1
+print(cfg['output']['tests'], cfg['output']['answer_key'], n, len(cfg['questions']['select']))")"
+IMG_PDF="${TESTS_PDF%.*}_img.${TESTS_PDF##*.}"
+
 PASS=0
 FAIL=0
 SKIP=0
@@ -62,28 +72,26 @@ validate_fase0() {
 
     # Preparar diretório de teste
     cd "$TEST_DIR" || { echo "❌ test-quick/ não encontrado"; exit 1; }
-    rm -rf Correcao/notas.csv latex_debug Prova_Capital_SP.pdf Gabarito_Capital_SP.pdf Prova_Capital_SP_img.pdf
+    rm -rf Correcao latex_debug "$TESTS_PDF" "$GABARITO_PDF" "$IMG_PDF"
 
     # T0.4 — Geração de PDF (prova + gabarito)
     python "$MAKETESTS_PY" -v > /tmp/validate_gen.log 2>&1
     gen_status=$?
-    [ -f Prova_Capital_SP.pdf ] && [ -f Gabarito_Capital_SP.pdf ]
+    [ -f "$TESTS_PDF" ] && [ -f "$GABARITO_PDF" ]
     files_ok=$?
     if [ $gen_status -eq 0 ] && [ $files_ok -eq 0 ]; then gen_ok=0; else gen_ok=1; fi
-    check "T0.4" "Geração de Prova_Capital_SP.pdf e Gabarito_Capital_SP.pdf (LaTeX)" $gen_ok
+    check "T0.4" "Geração de $TESTS_PDF e $GABARITO_PDF (LaTeX)" $gen_ok
 
     # Converte a prova (PDF "digital") em PDF de imagens, simulando uma prova escaneada
-    bash "$CONVERT_SH" Prova_Capital_SP.pdf > /tmp/validate_convert.log 2>&1
+    bash "$CONVERT_SH" "$TESTS_PDF" > /tmp/validate_convert.log 2>&1
     convert_status=$?
 
     # T0.3 — QR/código de barras: uma área de resposta por (aluno x questão selecionada)
-    # T0.5 — Correção: CSV final atualizado com nota para os 3 alunos
-    num_students=$(python3 -c "import csv; print(sum(1 for _ in csv.reader(open('Students.csv'), delimiter=';'))-1)")
-    num_questions=$(python3 -c "import json; print(len(json.load(open('config.json'))['questions']['select']))")
-    expected_areas=$((num_students*num_questions))
+    # T0.5 — Correção: CSV final atualizado com nota para todos os alunos
+    expected_areas=$((NUM_STUDENTS*NUM_QUESTIONS))
 
     if [ $convert_status -eq 0 ]; then
-        python "$MAKETESTS_PY" -vv -p Prova_Capital_SP_img.pdf > /tmp/validate_correction.log 2>&1
+        LLM_PROVIDER=mock python "$MAKETESTS_PY" -vv -p "$IMG_PDF" > /tmp/validate_correction.log 2>&1
         correction_status=$?
         qr_found=$(grep -c "^Answer area found" /tmp/validate_correction.log)
     else
@@ -94,14 +102,14 @@ validate_fase0() {
     [ "$qr_found" -eq "$expected_areas" ]
     check "T0.3" "QR/código de barras gerado e lido ($expected_areas/$expected_areas áreas identificadas)" $?
 
-    if [ $correction_status -eq 0 ] && [ -f Correcao/notas.csv ] && [ "$(grep -c ';[0-9]\+;[0-9.]\+' Correcao/notas.csv)" -eq 3 ]; then
+    if [ $correction_status -eq 0 ] && [ -f Correcao/notas.csv ] && [ "$(grep -c ';[0-9]\+;[0-9.]\+' Correcao/notas.csv)" -eq "$NUM_STUDENTS" ]; then
         correction_ok=0
     else
         correction_ok=1
     fi
-    check "T0.5" "Correção via PDF: atualização de Correcao/notas.csv para os 3 alunos" $correction_ok
+    check "T0.5" "Correção via PDF: atualização de Correcao/notas.csv para $NUM_STUDENTS aluno(s)" $correction_ok
 
-    rm -f Prova_Capital_SP_img.pdf
+    rm -f "$IMG_PDF"
     cd "$PROJECT_HOME"
 }
 
@@ -158,42 +166,57 @@ PYEOF
     fi
 
     cd "$TEST_DIR" || { echo "❌ test-quick/ não encontrado"; exit 1; }
-    rm -rf Correcao/notas.csv "Correcao/João da Silva" "Correcao/Maria Santos" "Correcao/Carlos Oliveira" latex_debug Prova_Capital_SP.pdf Gabarito_Capital_SP.pdf Prova_Capital_SP_img.pdf
+    rm -rf Correcao latex_debug "$TESTS_PDF" "$GABARITO_PDF" "$IMG_PDF"
 
     python "$MAKETESTS_PY" -v > /tmp/validate_fase1_gen.log 2>&1
     gen_status=$?
-    [ -f Prova_Capital_SP.pdf ] && [ -f Gabarito_Capital_SP.pdf ]
+    [ -f "$TESTS_PDF" ] && [ -f "$GABARITO_PDF" ]
     files_ok=$?
     if [ $gen_status -eq 0 ] && [ $files_ok -eq 0 ]; then gen_ok=0; else gen_ok=1; fi
     check "T1.4" "Prova com 2 questões (objetiva + dissertativa) compila em LaTeX" $gen_ok
 
     if [ $gen_ok -eq 0 ]; then
-        python3 -c "
-import PyPDF2, sys
-text = ''.join(p.extract_text() or '' for p in PyPDF2.PdfReader('Prova_Capital_SP.pdf').pages)
-sys.exit(0 if 'fotossintese' in text else 1)
-" 2>/tmp/validate_fase1_pdftext.log
+        # O trecho esperado vem do statement real da questão dissertativa do
+        # config.json (via gerar_prova_respondida.load_question) — trocar o
+        # tema da prova não exige editar este teste.
+        MAKETESTS_DIR="$MAKETESTS_DIR" TESTS_PDF="$TESTS_PDF" python3 - <<'PYEOF' 2>/tmp/validate_fase1_pdftext.log
+import json, os, re, sys
+import PyPDF2
+sys.path.insert(0, os.environ["MAKETESTS_DIR"])
+import gerar_prova_respondida as gpr
+
+cfg = json.load(open("config.json"))
+needle = None
+for sel in cfg["questions"]["select"]:
+    q, kind = gpr.load_question(os.getcwd(), cfg["questions"]["db_path"], sel["path"])
+    if kind == "dissertativa":
+        q.makeVariables()
+        needle = re.sub(r"\s+", "", q.statement)[:30]
+        break
+text = "".join(p.extract_text() or "" for p in PyPDF2.PdfReader(os.environ["TESTS_PDF"]).pages)
+sys.exit(0 if needle and needle in re.sub(r"\s+", "", text) else 1)
+PYEOF
         check "T1.5" "PDF inclui o enunciado da questão dissertativa" $?
     else
         check "T1.5" "PDF inclui o enunciado da questão dissertativa" 1
     fi
 
-    bash "$CONVERT_SH" Prova_Capital_SP.pdf > /tmp/validate_fase1_convert.log 2>&1
+    bash "$CONVERT_SH" "$TESTS_PDF" > /tmp/validate_fase1_convert.log 2>&1
     convert_status=$?
     if [ $convert_status -eq 0 ]; then
-        python "$MAKETESTS_PY" -vv -p Prova_Capital_SP_img.pdf > /tmp/validate_fase1_correction.log 2>&1
+        LLM_PROVIDER=mock python "$MAKETESTS_PY" -vv -p "$IMG_PDF" > /tmp/validate_fase1_correction.log 2>&1
         correction_status=$?
     else
         correction_status=1
     fi
-    if [ $correction_status -eq 0 ] && [ -f Correcao/notas.csv ] && [ "$(grep -c ';[0-9]\+;[0-9]\+;[0-9.]\+' Correcao/notas.csv)" -eq 3 ]; then
+    if [ $correction_status -eq 0 ] && [ -f Correcao/notas.csv ] && [ "$(grep -c ';[0-9]\+;[0-9]\+;[0-9.]\+' Correcao/notas.csv)" -eq "$NUM_STUDENTS" ]; then
         regress_ok=0
     else
         regress_ok=1
     fi
     check "T1.7" "Regressão: Q_1 (objetiva) e Q_2 (dissertativa) coexistem em Correcao/notas.csv" $regress_ok
 
-    rm -f Prova_Capital_SP_img.pdf
+    rm -f "$IMG_PDF"
     cd "$PROJECT_HOME"
 }
 
