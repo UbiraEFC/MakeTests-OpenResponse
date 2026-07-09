@@ -1391,6 +1391,14 @@ class QuestionDissertative(Question):
 	# fisicamente pequeno demais para escrita humana, não só para o OCR.
 	lines      = 6  # quantidade de linhas pautadas na área de resposta
 
+	# Aviso impresso abaixo do enunciado de TODA questão dissertativa. Motivo
+	# (Fase 7 + teste ao vivo E2E-Q2): o OCR (Tesseract) lê letra de forma com
+	# precisão alta (CER ~0,6%), mas cursiva degrada a leitura (CER ~5%,
+	# inclusive dígitos: 0->O, 1->l). Cursiva continua permitida — casos de
+	# baixa confiança caem na revisão HITL. Defina None na subclasse p/ omitir.
+	handwriting_notice = ("Responda preferencialmente em letra de forma: "
+	                      "letra cursiva pode reduzir a precisão da correção automática.")
+
 	statement = None
 	rubric    = None
 
@@ -1490,7 +1498,10 @@ class QuestionDissertative(Question):
 		return score, img, feedback
 
 	def getQuestionTex(self, desc):
-		return self.statement
+		tex = self.statement
+		if self.handwriting_notice:
+			tex += "\n\n\\textit{\\small " + self.handwriting_notice + "}"
+		return tex
 
 	def getAnswerText(self, LaTeX=True):
 		return "Rubrica: " + self.rubric

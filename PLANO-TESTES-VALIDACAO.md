@@ -322,6 +322,8 @@ Não bloqueia E2E-Q2 (já coberto desde a Fase 6); bloqueia apenas conclusões s
 
 **Hipótese confirmada** (cursiva CER > forma CER) e o estilo "misto" (alternância de fonte palavra a palavra, simulando inconsistência real de quem mistura cursiva e forma na mesma resposta) teve o peor desempenho dos três — resultado não previsto explicitamente no guia, mas coerente: confundir o OCR com troca de estilo no meio do texto é pior do que um estilo único e difícil. O score de confiança da Fase 5 acompanha a mesma ordem (forma > cursiva > misto), dando suporte qualitativo a usá-lo como proxy de risco de OCR mesmo sem rótulo humano.
 
+**Reconfirmado no teste ao vivo E2E (2026-07-09, pipeline completo com scanner simulado a 300dpi):** forma CER ~0,6% vs cursiva CER ~5,5% na mesma resposta, incluindo troca de dígitos por letras (`0`→`O`, `1`→`À`) — risco direto para rubricas onde o número carrega o critério. **Decisão de produto derivada:** cursiva permitida, com aviso impresso em toda questão dissertativa (`QuestionDissertative.handwriting_notice`, MakeTests.py) recomendando letra de forma, e o caminho baixa confiança → HITL como mitigação (no caso medido: confiança 66/"media", `review_recommended=true`). Detalhes em `GUIA-TESTE-AO-VIVO.md`, seção "Limitação conhecida: letra cursiva".
+
 ## Fase 8 — Q3 (validação empírica — fora do núcleo Q2)
 
 | ID | Teste | Critério |

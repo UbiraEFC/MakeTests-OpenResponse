@@ -39,8 +39,9 @@ Versão texto (caso o mermaid não renderize):
 | O quê | Arquivo |
 |---|---|
 | Quais questões entram, pesos | `test-quick/config.json` → `questions.select` |
+| Nome dos PDFs gerados | `test-quick/config.json` → `output` (hoje: `aed.pdf` / `aed_gabarito.pdf`) |
 | Quem são os alunos | `test-quick/Students.csv` |
-| Enunciado e rubrica de cada questão | `test-quick/Questions/Easy/capital_sp.py` (objetiva), `test-quick/Questions/Hard/dissertative_example.py` (dissertativa) |
+| Enunciado e rubrica de cada questão | `test-quick/Questions/Easy/alternative_example.py` (objetiva), `test-quick/Questions/Hard/dissertative_example.py` (dissertativa) |
 
 **Comando:**
 
@@ -49,7 +50,15 @@ cd test-quick
 python3 ../MakeTests.py -v
 ```
 
-**Saída:** `Prova_Capital_SP.pdf` (uma prova por aluno, com QR code de identificação) e `Gabarito_Capital_SP.pdf`.
+**Saída:** `aed.pdf` (uma prova por aluno, com QR code de identificação) e `aed_gabarito.pdf`.
+
+### Trocando o tema da prova
+
+Só 3 pontos precisam ser tocados — `gerar_prova_respondida.py` não precisa de nenhum ajuste (ele deriva do `config.json` os nomes de saída e o tipo de cada questão, e lê a alternativa correta das flags `True` do próprio `.py` da questão):
+
+1. **Questões**: criar/editar os `.py` em `test-quick/Questions/` (objetiva: lista `options` com a flag `True` na correta; dissertativa: `statement` + `rubric`).
+2. **`test-quick/config.json`**: apontar `questions.select` para os novos caminhos; opcionalmente trocar `output` para renomear os PDFs.
+3. **`test-quick/respostas.json`**: atualizar o texto da resposta dissertativa para o novo tema (`Q1`/`Q2`... seguem a ordem de `questions.select`).
 
 ---
 
@@ -59,7 +68,7 @@ Dois caminhos — escolha conforme o momento (ensaio vs. apresentação real):
 
 ### Caminho A — Real (recomendado para o dia da apresentação)
 
-1. Imprimir `Prova_Capital_SP.pdf` (ou exibir na tela).
+1. Imprimir `aed.pdf` (ou exibir na tela).
 2. Preencher à mão: marcar a bolha da questão objetiva, escrever a resposta dissertativa.
 3. Escanear ou fotografar (app de scanner do celular) e exportar como PDF.
 
@@ -67,14 +76,16 @@ Vantagem: é a demonstração mais convincente — OCR real sobre caligrafia rea
 
 ### Caminho B — Sintético (para ensaiar sem precisar imprimir/escanear toda vez)
 
-1. Editar `test-quick/respostas.json` — controla, por aluno, a resposta da questão objetiva (`"correta"`/`"errada"`/`"branco"`) e da dissertativa (texto + estilo de letra `"forma"`/`"cursiva"`, ou `"branco"`). Exemplo já incluso no arquivo.
+1. Editar `test-quick/respostas.json` — controla, por aluno, a resposta da questão objetiva (`"correta"`/`"errada"`/`"branco"`) e da dissertativa (texto + estilo de letra `"forma"`/`"cursiva"`, ou `"branco"`). Exemplo já incluso no arquivo. Textos longos são quebrados em linhas automaticamente para caber na área de resposta (use `\n` para forçar parágrafo).
 2. Rodar:
 
 ```bash
 python3 gerar_prova_respondida.py
 ```
 
-3. Saída: `test-quick/Prova_Capital_SP_img.pdf`, pronto para a Etapa 2 — já simula o "PDF escaneado".
+3. Saída (nomes derivados de `output.tests` do `config.json`):
+   - `test-quick/aed_respondida.pdf` — PDF digital (direto do pdflatex), para conferência visual;
+   - `test-quick/aed_respondida_img.pdf` — o mesmo rasterizado a 300dpi, simulando o "PDF escaneado" — **é este que vai para a Etapa 2**.
 
 Vantagem: repetível em segundos, dá controle total sobre quem acerta/erra/deixa em branco em cada rodada de ensaio.
 
@@ -86,11 +97,17 @@ Vantagem: repetível em segundos, dá controle total sobre quem acerta/erra/deix
 cd test-quick   # se ainda não estiver
 
 # Ensaio, sem gastar cota de API:
-LLM_PROVIDER=mock python3 ../MakeTests.py -vv -p Prova_Capital_SP_img.pdf
+LLM_PROVIDER=mock python3 ../MakeTests.py -vv -p aed_respondida_img.pdf
 
 # Apresentação real (usa o provider configurado em .env, hoje Gemini):
-python3 ../MakeTests.py -vv -p Prova_Capital_SP_img.pdf
+python3 ../MakeTests.py -vv -p aed_respondida_img.pdf
 ```
+
+> **Atenção:** o `MakeTests.py` procura `config.json` no diretório atual (ou no caminho passado como último argumento) e resolve **todos** os caminhos — inclusive o do `-p` — relativos à pasta do config. Para rodar sem `cd test-quick`:
+>
+> ```bash
+> python3 MakeTests.py -vv -p aed_respondida_img.pdf test-quick/config.json
+> ```
 
 **O que acontece:** o sistema lê o QR code de cada área de resposta, roda OCR (Tesseract) na questão dissertativa, chama o LLM (mock ou real conforme `LLM_PROVIDER`), calcula o score de confiança e grava:
 
@@ -108,6 +125,26 @@ python3 ../review_hitl.py adjust "<Nome do Aluno>" <número da questão> <nota m
 ```
 
 `list` ordena por confiança (menor confiança primeiro — o que mais precisa de atenção do professor). `accept` confirma a nota sugerida pela IA como final; `adjust` sobrescreve com uma nota definida pelo professor. Ambos atualizam `notas.csv` (`Nota_Final`) e o sidecar (`status_hitl`).
+
+---
+
+## Limitação conhecida: letra cursiva (achado dos testes Q2)
+
+Medido no teste ao vivo de 2026-07-09 (mesma resposta, pipeline completo com scanner simulado a 300dpi), consistente com o experimento da Fase 7 (`experiments/ocr_styles_results.csv`):
+
+| Estilo de letra | CER (erro por caractere) | Exemplo de erro |
+|---|---|---|
+| Letra de forma | ~0,6% | `0` lido como `O` |
+| Cursiva | ~5,5% | `arvores`→`amores`, `0 e 1`→`O e À`, `numeros`→`numenas` |
+
+O OCR (Tesseract) é um motor de texto impresso, não de manuscrito: cursiva degrada a segmentação de caracteres, e **dígitos no meio de prosa viram letras** (`0`→`O`, `1`→`l`) — o que pode custar pontos quando o número carrega o critério da rubrica ("no máximo **2** filhos").
+
+**Política adotada:** cursiva continua permitida, mas:
+
+1. Toda questão dissertativa agora imprime, abaixo do enunciado, o aviso *"Responda preferencialmente em letra de forma: letra cursiva pode reduzir a precisão da correção automática."* (centralizado em `QuestionDissertative.handwriting_notice` no `MakeTests.py`; uma subclasse pode definir `None` para omitir).
+2. A rede de segurança já existente cobre o resto: respostas com OCR ruim derrubam o score de confiança (`ocr_confianca_baixa`, `ocr_caracteres_duvidosos`) e sobem para o topo da fila do HITL — no caso medido, confiança 66/"media" com `review_recommended=true`.
+
+Esse é um bom resultado para relatar no Q2: limite quantificado do OCR + mitigação dupla (aviso preventivo na prova, revisão humana priorizada por confiança).
 
 ---
 
