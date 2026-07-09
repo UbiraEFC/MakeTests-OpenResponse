@@ -119,10 +119,18 @@ python3 ../MakeTests.py -vv -p aed_respondida_img.pdf
 ## Etapa 3 — Revisão HITL e nota final
 
 ```bash
+cd test-quick   # se ainda não estiver
 python3 ../review_hitl.py list
 python3 ../review_hitl.py accept "<Nome do Aluno>" <número da questão>
 python3 ../review_hitl.py adjust "<Nome do Aluno>" <número da questão> <nota manual>
 ```
+
+> **Atenção:** assim como o `MakeTests.py`, o `review_hitl.py` procura `config.json` no diretório atual por padrão. Para rodar sem `cd test-quick`, use `--config` — mas ele é um argumento do parser **principal**, então tem que vir **antes** do subcomando (`list`/`accept`/`adjust`), senão o argparse recusa:
+>
+> ```bash
+> python3 review_hitl.py --config test-quick/config.json list
+> python3 review_hitl.py --config test-quick/config.json accept "<Nome do Aluno>" <número da questão>
+> ```
 
 `list` ordena por confiança (menor confiança primeiro — o que mais precisa de atenção do professor). `accept` confirma a nota sugerida pela IA como final; `adjust` sobrescreve com uma nota definida pelo professor. Ambos atualizam `notas.csv` (`Nota_Final`) e o sidecar (`status_hitl`).
 
