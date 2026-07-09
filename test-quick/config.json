@@ -1,10 +1,10 @@
 {
   "questions": {
-    "salt": "teste_capital",
+    "salt": "teste_aed",
     "db_path": "Questions",
     "select": [
       {
-        "path": "Easy/capital_sp",
+        "path": "Easy/alternative_example",
         "weight": 1,
         "replaces": {}
       },
@@ -21,8 +21,8 @@
     "quotechar": "\""
   },
   "output": {
-    "tests": "Prova_Capital_SP.pdf",
-    "answer_key": "Gabarito_Capital_SP.pdf"
+    "tests": "aed.pdf",
+    "answer_key": "aed_gabarito.pdf"
   },
   "correction": {
     "path": "Correcao",
@@ -45,7 +45,7 @@
   },
   "tex": {
     "max_pages": 2,
-    "preamble": "\\documentclass[12pt,a4paper]{article}\\usepackage[utf8]{inputenc}\\usepackage{geometry}\\usepackage{enumitem}\\usepackage{multicol}\\usepackage{graphicx}\\geometry{margin=1in}\\title{Prova de Geografia}\\author{}\\date{}\\begin{document}\\maketitle",
+    "preamble": "\\documentclass[12pt,a4paper]{article}\\usepackage[utf8]{inputenc}\\usepackage{geometry}\\usepackage{enumitem}\\usepackage{multicol}\\usepackage{graphicx}\\geometry{margin=1in}\\title{Prova de Algoritmos e Estruturas de Dados}\\author{}\\date{}\\begin{document}\\maketitle",
     "termination": "\\end{document}",
     "test": {
       "header": "Nome: %NAME% (ID: %ID%)",
