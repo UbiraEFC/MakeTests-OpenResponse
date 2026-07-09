@@ -1,0 +1,20 @@
+{
+  "João da Silva": {
+    "Q1": "correta",
+    "Q2": {
+      "texto": "A fotossintese converte luz solar em energia quimica usando a clorofila presente nos cloroplastos, liberando oxigenio como subproduto.",
+      "estilo": "forma"
+    }
+  },
+  "Maria Santos": {
+    "Q1": "correta",
+    "Q2": "branco"
+  },
+  "Carlos Oliveira": {
+    "Q1": "errada",
+    "Q2": {
+      "texto": "A fotossintese usa a clorofila para produzir energia a partir da luz.",
+      "estilo": "cursiva"
+    }
+  }
+}
