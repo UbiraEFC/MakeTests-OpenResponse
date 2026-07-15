@@ -327,40 +327,77 @@ class ImageUtils:
 	def findAnswerAreas(img, verbose=False):
 		import numpy as np
 
-		# Find all bars (header or footer of an answer area)
-		bars = []
-		markers = [m for m in ImageUtils.markerDetector(img)]
-		for i1 in range(len(markers)):
-			c1, r1 = markers[i1] 
-			if verbose:
-				cv2.circle(img, (int(c1[0]),int(c1[1])), int(r1),(0,0,255), thickness=cv2.FILLED)
-			for i2 in range(i1+1,len(markers)):
-				c2,r2 = markers[i2] 
-				p1, p2 = ImageUtils.findPointsPerpendicularToTheLine(c1, c2, r1)
-				p3, p4 = ImageUtils.findPointsPerpendicularToTheLine(c2, c1, r2)
-				box = np.array([p1, p2, p3, p4], dtype=np.int64)
-				warp = ImageUtils.warpImage(img, box)
-				for p,d,t in ImageUtils.barcodeDecoder(warp):
-					if len(d) > 6: # Todo: check if it is a valid code!
-						if verbose:
-							cv2.drawContours(img,[box],0,(0,0,255),2)
-						bars.append([i1, i2, d])
+		# Detecção/decodificação sempre leem desta cópia limpa: o feedback
+		# visual do verbose pinta círculos/contornos em img, e um candidato
+		# falso pintado em cima do barcode corrompia a decodificação (visto
+		# com scans reais; em imagens sintéticas os únicos candidatos são os
+		# 4 alvos verdadeiros e o problema nunca aparecia).
+		clean = img.copy() if verbose else img
 
-		# Find all sections (headers and footers bars of a same answer area)
-		sections = []
-		for i1 in range(len(bars)):
-			_, _, d1 = bars[i1]; d1 = d1.decode('utf-8')
-			for i2 in range(i1+1, len(bars)):
-				_, _, d2 = bars[i2]; d2 = d2.decode('utf-8')
-				if ( (d1[0] == ImageUtils.IMAGE_UP_CODE   and d2[0] == ImageUtils.IMAGE_DOWN_CODE) or
-				     (d1[0] == ImageUtils.IMAGE_DOWN_CODE and d2[0] == ImageUtils.IMAGE_UP_CODE  ) ) and d1[1:] == d2[1:]:
-					if d1[0] == ImageUtils.IMAGE_UP_CODE:
-						sections.append([bars[i1], bars[i2], str(d1[1:])])
-					else:
-						sections.append([bars[i2], bars[i1], str(d1[1:])])
+		# Dois passes de detecção de marcadores: o original (documentos
+		# digitais/rasterizados, anéis nítidos -> hierarquia profunda) e, se
+		# nada for encontrado, um modo tolerante para scans/fotos reais, onde
+		# o borrão do scanner funde os anéis do alvo e quebra o aninhamento
+		# (validado com provas fotografadas no teste ao vivo E2E-Q2). Os
+		# falsos positivos extras do modo tolerante são inofensivos: um par de
+		# marcadores só vira seção se houver barcode válido entre eles.
+		for minHierarchy, smallArea in ((7, False), (5, True)):
+			markers = [m for m in ImageUtils.markerDetector(clean, minHierarchy=minHierarchy, smallArea=smallArea)]
+
+			# Funde marcadores duplicados (mesmo alvo detectado em níveis de
+			# contorno diferentes gera centros praticamente idênticos).
+			merged = []
+			for c, r in markers:
+				if not any((c[0]-c2[0])**2 + (c[1]-c2[1])**2 <= (max(r, r2)*0.5)**2 for c2, r2 in merged):
+					merged.append((c, r))
+			markers = merged
+
+			# Find all bars (header or footer of an answer area)
+			bars = []
+			for i1 in range(len(markers)):
+				c1, r1 = markers[i1]
+				if verbose:
+					cv2.circle(img, (int(c1[0]),int(c1[1])), int(r1),(0,0,255), thickness=cv2.FILLED)
+				for i2 in range(i1+1,len(markers)):
+					c2,r2 = markers[i2]
+					if np.hypot(c2[0]-c1[0], c2[1]-c1[1]) <= r1 + r2:
+						continue # Degenerado (quase concêntricos): não há barra entre eles
+					p1, p2 = ImageUtils.findPointsPerpendicularToTheLine(c1, c2, r1)
+					p3, p4 = ImageUtils.findPointsPerpendicularToTheLine(c2, c1, r2)
+					box = np.array([p1, p2, p3, p4], dtype=np.int64)
+					warp = ImageUtils.warpImage(clean, box)
+					for p,d,t in ImageUtils.barcodeDecoder(warp):
+						if len(d) > 6: # Todo: check if it is a valid code!
+							if verbose:
+								cv2.drawContours(img,[box],0,(0,0,255),2)
+							bars.append([i1, i2, d])
+
+			# Find all sections (headers and footers bars of a same answer area)
+			sections = []
+			for i1 in range(len(bars)):
+				_, _, d1 = bars[i1]; d1 = d1.decode('utf-8')
+				for i2 in range(i1+1, len(bars)):
+					_, _, d2 = bars[i2]; d2 = d2.decode('utf-8')
+					if ( (d1[0] == ImageUtils.IMAGE_UP_CODE   and d2[0] == ImageUtils.IMAGE_DOWN_CODE) or
+					     (d1[0] == ImageUtils.IMAGE_DOWN_CODE and d2[0] == ImageUtils.IMAGE_UP_CODE  ) ) and d1[1:] == d2[1:]:
+						if d1[0] == ImageUtils.IMAGE_UP_CODE:
+							sections.append([bars[i1], bars[i2], str(d1[1:])])
+						else:
+							sections.append([bars[i2], bars[i1], str(d1[1:])])
+
+			if sections:
+				break
+
+		# Cada área é corrigida (e, na dissertativa, avaliada via LLM) uma
+		# única vez: descarta seções repetidas do mesmo código, que aparecem
+		# quando marcadores extras pareiam com o mesmo barcode.
+		seen_codes = set()
 
 		# Find answer area
 		for topBar, bottomBar, code in sections:
+			if code in seen_codes:
+				continue
+			seen_codes.add(code)
 			tl = markers[topBar[0]][0];    tlr = markers[topBar[0]][1]
 			tr = markers[topBar[1]][0];    trr = markers[topBar[1]][1]
 			bl = markers[bottomBar[0]][0]; blr = markers[bottomBar[0]][1]
@@ -388,7 +425,7 @@ class ImageUtils:
 			bl = ImageUtils.findPointAlongTheLine(bl, br, -blr   ); br = ImageUtils.findPointAlongTheLine(br, bl, -brr   )
 
 			# Get answer area
-			ansArea = ImageUtils.warpImage(img, (tl,tr,br,bl))
+			ansArea = ImageUtils.warpImage(clean, (tl,tr,br,bl))
 			if verbose:
 				cv2.drawContours(img, [np.array([tl,tr,br,bl], dtype=np.int64)],0,(0,255,255), thickness=2)
 
