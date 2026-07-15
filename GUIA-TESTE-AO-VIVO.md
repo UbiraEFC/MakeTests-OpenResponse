@@ -154,6 +154,8 @@ O OCR (Tesseract) é um motor de texto impresso, não de manuscrito: cursiva deg
 
 Esse é um bom resultado para relatar no Q2: limite quantificado do OCR + mitigação dupla (aviso preventivo na prova, revisão humana priorizada por confiança).
 
+> **Consolidação completa dos testes de OCR** (golden fixtures, Fase 7, E2E sintético e provas reais manuscritas, com todos os números e a análise de limitações): ver `RESULTADOS-TESTE-PROVAS-REAIS-OCR.md`.
+
 ---
 
 ## Roteiro sugerido para a apresentação

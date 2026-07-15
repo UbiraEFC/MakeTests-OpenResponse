@@ -324,6 +324,8 @@ Não bloqueia E2E-Q2 (já coberto desde a Fase 6); bloqueia apenas conclusões s
 
 **Reconfirmado no teste ao vivo E2E (2026-07-09, pipeline completo com scanner simulado a 300dpi):** forma CER ~0,6% vs cursiva CER ~5,5% na mesma resposta, incluindo troca de dígitos por letras (`0`→`O`, `1`→`À`) — risco direto para rubricas onde o número carrega o critério. **Decisão de produto derivada:** cursiva permitida, com aviso impresso em toda questão dissertativa (`QuestionDissertative.handwriting_notice`, MakeTests.py) recomendando letra de forma, e o caminho baixa confiança → HITL como mitigação (no caso medido: confiança 66/"media", `review_recommended=true`). Detalhes em `GUIA-TESTE-AO-VIVO.md`, seção "Limitação conhecida: letra cursiva".
 
+**Teste com provas reais manuscritas (2026-07-15):** 4 provas impressas, preenchidas à mão e fotografadas, corrigidas com Gemini real — CER saltou para 58–63% (letra de forma) e 72–73% (cursiva), confirmando que fontes sintéticas não são proxy suficiente para caligrafia humana; a rede de segurança (confiança + HITL) sinalizou 4/4 para revisão. O teste também revelou e corrigiu 4 defeitos de detecção de área em scans reais (`findAnswerAreas`). Consolidação completa de todos os testes de OCR e limitações: `RESULTADOS-TESTE-PROVAS-REAIS-OCR.md`.
+
 ## Fase 8 — Q3 (validação empírica — fora do núcleo Q2)
 
 | ID | Teste | Critério |
