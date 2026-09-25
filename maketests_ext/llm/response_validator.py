@@ -38,6 +38,10 @@ def validate(raw, provider_metadata=None):
         # Sem sinal confiável do provedor: lado conservador é recomendar revisão.
         review_recommended = True
 
+    transcription = raw.get("transcription")
+    if not isinstance(transcription, str):
+        transcription = None
+
     return GradingResult(
         suggested_score=score,
         rationale=rationale,
@@ -45,4 +49,5 @@ def validate(raw, provider_metadata=None):
         review_recommended=review_recommended,
         provider_metadata=provider_metadata or {},
         error=None,
+        transcription=transcription,
     )
