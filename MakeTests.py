@@ -1460,30 +1460,54 @@ class QuestionDissertative(Question):
 
 	def doCorrection(self, img):
 		import numpy as np
+		import os
 
-		# Fase 2/3: extração OCR + normalização. Fase 4: avaliação semântica
-		# via maketests_ext/llm_grader.py — fachada que esconde qual provedor
+		# Fase 2/3: extração OCR + normalização (modo legado, LLM_VISION_MODE=
+		# off). Roadmap Q3 Fase 1 (ADR-001): LLM_VISION_MODE=on pula OCR e
+		# envia a imagem diretamente ao provider (mesmo ponto de wiring -
+		# só muda a origem do payload). Fase 4: avaliação semântica via
+		# maketests_ext/llm_grader.py — fachada que esconde qual provedor
 		# está ativo (LLM_PROVIDER; default "mock", sem credencial). Fase 5:
 		# score de confiança heurístico, agregando sinais de OCR e LLM — não
 		# altera a nota sugerida, só prioriza revisão. Fase 6: tudo isso fica
 		# disponível em self.last_assist para Main.doCorrection persistir num
 		# sidecar JSON por aluno/questão (review_hitl.py consome esse sidecar).
-		try:
-			from maketests_ext.ocr_extract import extract_text
-			ocr_result = extract_text(img)
-		except Exception as e:
-			ocr_result = {"text": "(OCR indisponível: {})".format(e), "confidence_mean": None, "char_doubt_ratio": 0.0}
-		ocr_text = ocr_result["text"]
-
-		try:
-			from maketests_ext.text_normalize import normalize
-			normalized_text = normalize(ocr_text)
-		except Exception as e:
-			normalized_text = "(normalização indisponível: {})".format(e)
+		from maketests_ext.llm.provider_factory import ensure_dotenv_loaded
+		ensure_dotenv_loaded()
+		vision_mode = os.environ.get("LLM_VISION_MODE", "off").strip().lower() == "on"
 
 		from maketests_ext.llm_grader import grade
 		from maketests_ext.llm.schemas import GradingPayload
-		result = grade(GradingPayload(statement=self.statement, rubric=self.rubric, normalized_text=normalized_text))
+
+		ocr_text = None
+		normalized_text = None
+		ocr_result = {"confidence_mean": None, "char_doubt_ratio": 0.0}
+
+		if vision_mode:
+			from maketests_ext.image_prep import encode_for_vision
+			image_bytes, image_mime_type = encode_for_vision(img)
+			payload = GradingPayload(
+				statement=self.statement, rubric=self.rubric,
+				image_bytes=image_bytes, image_mime_type=image_mime_type,
+			)
+		else:
+			try:
+				from maketests_ext.ocr_extract import extract_text
+				ocr_result = extract_text(img)
+			except Exception as e:
+				ocr_result = {"text": "(OCR indisponível: {})".format(e), "confidence_mean": None, "char_doubt_ratio": 0.0}
+			ocr_text = ocr_result["text"]
+
+			try:
+				from maketests_ext.text_normalize import normalize
+				normalized_text = normalize(ocr_text)
+			except Exception as e:
+				normalized_text = "(normalização indisponível: {})".format(e)
+
+			payload = GradingPayload(statement=self.statement, rubric=self.rubric, normalized_text=normalized_text)
+
+		result = grade(payload)
+		transcription_text = result.transcription or normalized_text or ""
 		score = result.suggested_score
 		provider = result.provider_metadata.get("provider", "?")
 		rationale = (result.rationale or result.error or "")[:60]
@@ -1508,8 +1532,10 @@ class QuestionDissertative(Question):
 		try:
 			import datetime
 			self.last_assist = {
+				"mode": "vision" if vision_mode else "ocr_legacy",
 				"ocr_text": ocr_text,
 				"normalized_text": normalized_text,
+				"transcription": result.transcription,
 				"suggested_score": result.suggested_score,
 				"rationale": result.rationale,
 				"rubric_coverage": result.rubric_coverage,
@@ -1526,8 +1552,11 @@ class QuestionDissertative(Question):
 
 		imgInfo = np.zeros((160, img.shape[1], 3), np.uint8)
 		imgInfo[:,:] = (255,255,255)
-		ImageUtils.drawTextInsideTheBox(imgInfo[0:40,:], "OCR (raw): {}".format(ocr_text))
-		ImageUtils.drawTextInsideTheBox(imgInfo[40:80,:], "Normalizado: {}".format(normalized_text))
+		if vision_mode:
+			ImageUtils.drawTextInsideTheBox(imgInfo[0:40,:], "Transcricao (LLM): {}".format(transcription_text))
+		else:
+			ImageUtils.drawTextInsideTheBox(imgInfo[0:40,:], "OCR (raw): {}".format(ocr_text))
+			ImageUtils.drawTextInsideTheBox(imgInfo[40:80,:], "Normalizado: {}".format(normalized_text))
 		ImageUtils.drawTextInsideTheBox(imgInfo[80:120,:], score_line)
 		ImageUtils.drawTextInsideTheBox(imgInfo[120:160,:], confidence_line)
 		feedback = np.vstack((imgInfo, img))
