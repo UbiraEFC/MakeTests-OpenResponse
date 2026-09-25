@@ -26,6 +26,13 @@ LaTeX e rasterizar — em vez de duplicar essa logica aqui.
 Uso: LLM_PROVIDER=mock python3 tests/test_synthetic_answers.py
 Assume cwd = MakeTests/ (raiz do repo, onde este script eh chamado por
 validate-maketests.sh).
+
+Roadmap Q3 Fase 1 (ADR-001): com LLM_VISION_MODE=on, o mesmo cenario roda
+pelo caminho vision (doCorrection le a env var diretamente - ver
+MakeTests.py:QuestionDissertative.doCorrection) e os testes T1.8/T6.1 sao
+substituidos pelos equivalentes TV1.9/TV1.10 (banner "Transcricao (LLM):" e
+sidecar com transcription/mode="vision" em vez de OCR/normalizado) - roda ao
+lado da execucao legada (LLM_VISION_MODE=off), nao a substitui.
 """
 import csv
 import json
@@ -72,6 +79,7 @@ def main():
 
 
 def run_tests(root, fixture):
+    vision_mode = os.environ.get("LLM_VISION_MODE", "off").strip().lower() == "on"
     src = os.path.join(root, "test-quick")
 
     # 1) Fixture isolada: copia de test-quick (sem artefatos gerados), com
@@ -135,17 +143,29 @@ def run_tests(root, fixture):
               and scores_q1.get("Carlos Oliveira") == "0")
     print("T0.6", "OK" if ok_t06 else "FAIL scores={}".format(scores_q1))
 
-    # T1.8 — dissertativa, end-to-end com resposta real (texto realmente lido, nao mockado).
-    # O OCR sobre a área pautada real ainda tem ruído residual ao redor do
-    # texto (limitação conhecida, ver nota em ocr_extract.py) - a fidelidade
-    # exata varia entre execuções, então o critério honesto aqui é "há sinal
-    # real e substancial quando algo foi escrito, nada quando está em branco",
-    # não reconhecimento perfeito.
-    ocr_banners = [c for c in captured if c.startswith("OCR (raw):")]
-    non_trivial = [c for c in ocr_banners if len(c) > len("OCR (raw): ") + 15]
-    blank = [c for c in ocr_banners if c == "OCR (raw): "]
-    ok_t18 = len(non_trivial) == 2 and len(blank) == 1
-    print("T1.8", "OK" if ok_t18 else "FAIL ocr_banners={}".format(ocr_banners))
+    if vision_mode:
+        # TV1.9 (roadmap Q3 Fase 1, ADR-001) — mesma ideia do T1.8, mas pelo
+        # caminho vision: banner "Transcricao (LLM):" em vez de "OCR (raw):".
+        # O mock nao le pixels (ver mock_provider.py), entao a transcricao
+        # em si e sempre o mesmo texto fixo "[mock] transcrição
+        # indisponível..." nas 3 respostas (branco ou nao) - o teste aqui e
+        # de wiring (o caminho vision roda e produz o banner certo para as 3
+        # respostas), nao de qualidade de leitura.
+        vision_banners = [c for c in captured if c.startswith("Transcricao (LLM):")]
+        ok_tv19 = len(vision_banners) == 3
+        print("TV1.9", "OK" if ok_tv19 else "FAIL vision_banners={}".format(vision_banners))
+    else:
+        # T1.8 — dissertativa, end-to-end com resposta real (texto realmente lido, nao mockado).
+        # O OCR sobre a área pautada real ainda tem ruído residual ao redor do
+        # texto (limitação conhecida, ver nota em ocr_extract.py) - a fidelidade
+        # exata varia entre execuções, então o critério honesto aqui é "há sinal
+        # real e substancial quando algo foi escrito, nada quando está em branco",
+        # não reconhecimento perfeito.
+        ocr_banners = [c for c in captured if c.startswith("OCR (raw):")]
+        non_trivial = [c for c in ocr_banners if len(c) > len("OCR (raw): ") + 15]
+        blank = [c for c in ocr_banners if c == "OCR (raw): "]
+        ok_t18 = len(non_trivial) == 2 and len(blank) == 1
+        print("T1.8", "OK" if ok_t18 else "FAIL ocr_banners={}".format(ocr_banners))
 
     # Fase 6 - sidecar HITL (Q_2_assist.json) + review_hitl.py
     review_py = os.path.join(root, "review_hitl.py")
@@ -154,17 +174,32 @@ def run_tests(root, fixture):
     joao_sidecar_path = os.path.join(joao_dir, "Q_2_assist.json")
     carlos_sidecar_path = os.path.join(carlos_dir, "Q_2_assist.json")
 
-    # T6.1 - sidecar criado com OCR, normalizado, nota sugerida, confianca e parecer
-    try:
-        joao_sidecar = json.load(open(joao_sidecar_path))
-        ok_t61 = (joao_sidecar.get("ocr_text") and joao_sidecar.get("normalized_text")
-                  and isinstance(joao_sidecar.get("suggested_score"), (int, float))
-                  and joao_sidecar.get("confidence_score") is not None
-                  and joao_sidecar.get("rationale") is not None)
-    except Exception as e:
-        ok_t61, joao_sidecar = False, {}
-        print("T6.1 erro:", e)
-    print("T6.1", "OK" if ok_t61 else "FAIL sidecar={}".format(joao_sidecar))
+    if vision_mode:
+        # TV1.10 - sidecar criado com transcription/mode="vision" em vez de
+        # ocr_text/normalized_text (que ficam None no caminho vision - ver
+        # doCorrection em MakeTests.py).
+        try:
+            joao_sidecar = json.load(open(joao_sidecar_path))
+            ok_tv110 = (joao_sidecar.get("mode") == "vision" and joao_sidecar.get("transcription")
+                        and isinstance(joao_sidecar.get("suggested_score"), (int, float))
+                        and joao_sidecar.get("confidence_score") is not None
+                        and joao_sidecar.get("rationale") is not None)
+        except Exception as e:
+            ok_tv110, joao_sidecar = False, {}
+            print("TV1.10 erro:", e)
+        print("TV1.10", "OK" if ok_tv110 else "FAIL sidecar={}".format(joao_sidecar))
+    else:
+        # T6.1 - sidecar criado com OCR, normalizado, nota sugerida, confianca e parecer
+        try:
+            joao_sidecar = json.load(open(joao_sidecar_path))
+            ok_t61 = (joao_sidecar.get("ocr_text") and joao_sidecar.get("normalized_text")
+                      and isinstance(joao_sidecar.get("suggested_score"), (int, float))
+                      and joao_sidecar.get("confidence_score") is not None
+                      and joao_sidecar.get("rationale") is not None)
+        except Exception as e:
+            ok_t61, joao_sidecar = False, {}
+            print("T6.1 erro:", e)
+        print("T6.1", "OK" if ok_t61 else "FAIL sidecar={}".format(joao_sidecar))
 
     # T6.2 - notas.csv ja tem Q_2 preenchido (nota sugerida), mas sidecar ainda pendente
     q2_joao_csv = notas.get("João da Silva", {}).get(q_col(2))
