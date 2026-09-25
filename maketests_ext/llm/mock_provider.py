@@ -19,6 +19,21 @@ class MockProvider(LLMProvider):
     """
 
     def grade_answer(self, payload):
+        if payload.image_bytes:
+            # O mock e deliberadamente offline/sem-visao (ver docstring da
+            # classe) - nao pode "ler" a imagem. Devolve um resultado
+            # honesto sobre essa limitacao (nunca finge uma transcricao),
+            # so o suficiente para exercitar o contrato do caminho vision
+            # (ADR-001, roadmap Q3 Fase 1) sem custo/rede.
+            return GradingResult(
+                suggested_score=0,
+                rationale="[mock] transcrição indisponível em modo offline (vision).",
+                rubric_coverage={},
+                review_recommended=True,
+                provider_metadata={"provider": "mock", "model": "keyword-overlap-v1", "modality": "vision"},
+                transcription="[mock] transcrição indisponível em modo offline (vision)",
+            )
+
         student_words = _words(payload.normalized_text)
 
         if not student_words:

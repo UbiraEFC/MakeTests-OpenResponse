@@ -1,10 +1,11 @@
+import base64
 import json
 import os
 import urllib.error
 import urllib.request
 
 from .base import LLMProvider
-from .prompt_builder import PROMPT_VERSION, build_prompt
+from .prompt_builder import build_prompt, resolve_prompt_version
 from .response_validator import validate
 from .schemas import GradingResult
 
@@ -19,6 +20,7 @@ RESPONSE_SCHEMA = {
         "rationale": {"type": "string"},
         "rubric_coverage": {"type": "object"},
         "review_recommended": {"type": "boolean"},
+        "transcription": {"type": "string"},
     },
     "required": ["suggested_score", "rationale", "review_recommended"],
 }
@@ -38,7 +40,13 @@ class GeminiProvider(LLMProvider):
     def grade_answer(self, payload):
         run_params = payload.run_params or {}
         model = run_params.get("model", self.model)
-        provider_metadata = {"provider": "gemini", "model": model, "prompt_version": PROMPT_VERSION}
+        modality = "vision" if payload.image_bytes else "text"
+        provider_metadata = {
+            "provider": "gemini",
+            "model": model,
+            "prompt_version": resolve_prompt_version(payload),
+            "modality": modality,
+        }
 
         if not self.api_key:
             return GradingResult(
@@ -51,8 +59,16 @@ class GeminiProvider(LLMProvider):
             )
 
         prompt = build_prompt(payload)
+        parts = [{"text": prompt}]
+        if payload.image_bytes:
+            parts.append({
+                "inlineData": {
+                    "mimeType": payload.image_mime_type or "image/jpeg",
+                    "data": base64.b64encode(payload.image_bytes).decode("ascii"),
+                }
+            })
         body = json.dumps({
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"parts": parts}],
             "generationConfig": {
                 "temperature": run_params.get("temperature", self.temperature),
                 "responseMimeType": "application/json",
@@ -73,13 +89,17 @@ class GeminiProvider(LLMProvider):
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 raw_response = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
+            if e.code == 429:
+                error = "rate_limited: {}".format(e.read().decode("utf-8", "replace")[:300])
+            else:
+                error = "http_{}: {}".format(e.code, e.read().decode("utf-8", "replace")[:300])
             return GradingResult(
                 suggested_score=0,
                 rationale="",
                 rubric_coverage={},
                 review_recommended=True,
                 provider_metadata=provider_metadata,
-                error="http_{}: {}".format(e.code, e.read().decode("utf-8", "replace")[:300]),
+                error=error,
             )
         except (urllib.error.URLError, TimeoutError) as e:
             return GradingResult(
