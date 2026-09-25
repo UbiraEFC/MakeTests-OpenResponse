@@ -665,12 +665,41 @@ finally:
     gp_mod.urllib.request.urlopen = orig_urlopen
 ok = r.error is not None and r.error.startswith("rate_limited:") and r.review_recommended is True
 print("TV1.8", "OK" if ok else "FAIL {}".format(r))
+
+# TV1.13/1.14/1.15 - contrato do AnthropicProvider (roadmap Q3 Fase 1/3),
+# mesmo padrao defensivo acima: sem API key, parsing de JSON sem structured
+# output nativo (rubric_coverage tem chaves dinamicas, incompativel com
+# output_config.format da Anthropic - ver anthropic_provider.py), e HTTP 429.
+import maketests_ext.llm.anthropic_provider as ap_mod
+from maketests_ext.llm.anthropic_provider import _parse_json_response
+
+os.environ.pop("LLM_API_KEY", None)
+r = ap_mod.AnthropicProvider(api_key=None).grade_answer(img_payload)
+ok = r.error == "missing_api_key" and r.review_recommended is True
+print("TV1.13", "OK" if ok else "FAIL {}".format(r))
+
+# TV1.14 - parsing tolera texto acessorio ao redor do JSON (sem JSON mode nativo)
+parsed = _parse_json_response('Segue minha analise:\n{"suggested_score": 55, "rationale": "x", "review_recommended": true}\nFim.')
+ok = parsed is not None and parsed.get("suggested_score") == 55 and _parse_json_response("isso nao e json") is None
+print("TV1.14", "OK" if ok else "FAIL {}".format(parsed))
+
+orig_urlopen_ap = ap_mod.urllib.request.urlopen
+ap_mod.urllib.request.urlopen = fake_urlopen_429
+try:
+    r = ap_mod.AnthropicProvider(api_key="fake-key-for-test").grade_answer(img_payload)
+finally:
+    ap_mod.urllib.request.urlopen = orig_urlopen_ap
+ok = r.error is not None and r.error.startswith("rate_limited:") and r.review_recommended is True
+print("TV1.15", "OK" if ok else "FAIL {}".format(r))
 PYEOF
     ) > /tmp/validate_vision_fase1_contract.log 2>&1
 
     grep -q "^TV1.6 OK" /tmp/validate_vision_fase1_contract.log; check "TV1.6" "Sem API key + imagem: erro claro, sem excecao" $?
     grep -q "^TV1.7 OK" /tmp/validate_vision_fase1_contract.log; check "TV1.7" "Resposta malformada (sem transcription): default conservador" $?
     grep -q "^TV1.8 OK" /tmp/validate_vision_fase1_contract.log; check "TV1.8" "HTTP 429: erro distinguível de outros HTTP 4xx" $?
+    grep -q "^TV1.13 OK" /tmp/validate_vision_fase1_contract.log; check "TV1.13" "AnthropicProvider sem API key + imagem: erro claro" $?
+    grep -q "^TV1.14 OK" /tmp/validate_vision_fase1_contract.log; check "TV1.14" "AnthropicProvider: parsing de JSON tolera texto acessório" $?
+    grep -q "^TV1.15 OK" /tmp/validate_vision_fase1_contract.log; check "TV1.15" "AnthropicProvider: HTTP 429 distinguível" $?
 
     # TV1.9/1.10 - mesmo cenario de validate_synthetic_answers(), agora pelo
     # caminho vision (LLM_VISION_MODE=on): banner "Transcricao (LLM):" e
