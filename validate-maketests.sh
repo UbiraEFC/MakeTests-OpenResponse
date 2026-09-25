@@ -845,7 +845,14 @@ validate_synthetic_answers() {
 
 ################################################################################
 # main
+#
+# Guardado atrás de BASH_SOURCE == 0: quando o script é *sourced* (padrão
+# documentado para os testes live opt-in, ex. `bash -c 'source
+# validate-maketests.sh; validate_fase4_live'`), só as definições de função
+# acima devem ficar disponíveis - sem isso, o `exit 0` no fim deste bloco
+# encerraria o shell antes do comando live seguinte rodar.
 ################################################################################
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 echo "================================================"
 echo "Validação dos principais fluxos do MakeTests"
 echo "================================================"
@@ -878,3 +885,4 @@ fi
 
 echo "✅ Nenhuma falha nos fluxos já implementados."
 exit 0
+fi
