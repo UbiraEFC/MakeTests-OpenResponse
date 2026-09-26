@@ -779,8 +779,13 @@ try:
             baseline = json.load(open(baseline_path))
             baseline_score = baseline.get("suggested_score")
             baseline_score_conf = baseline.get("confidence_score")
+        transcription = assist.get("transcription") or ""
+        # Truncar so na exibicao (nao no dado): >120 chars ganha reticencias
+        # explicitas para nao parecer um corte silencioso de conteudo real -
+        # a transcricao completa esta sempre em assist["transcription"].
+        transcription_display = transcription if len(transcription) <= 120 else transcription[:120] + "…"
         print("{}: mode={} transcription={!r} score={} (baseline OCR: score={} conf={}) confidence={}".format(
-            nome, assist.get("mode"), (assist.get("transcription") or "")[:80],
+            nome, assist.get("mode"), transcription_display,
             assist.get("suggested_score"), baseline_score, baseline_score_conf,
             assist.get("confidence_score")))
         if assist.get("mode") != "vision" or not assist.get("transcription"):
