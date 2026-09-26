@@ -4,11 +4,11 @@
 
 | Campo | Valor |
 |---|---|
-| **Status** | Proposto (aguardando validação experimental — Roadmap Q3) |
-| **Data** | 2026-07-15 |
+| **Status** | Aceito — Fase 1 do roadmap (§11) implementada e validada em 2026-09-25 (branch `pgc3/dissertativa-fase1`); `LLM_VISION_MODE=on` é o caminho de produção default. Fases 2–5 seguem propostas, aguardando corpus ampliado. |
+| **Data** | 2026-07-15 (decisão original) — validação experimental da Fase 1 em 2026-09-25 |
 | **Contexto do projeto** | MakeTests — extensão para correção assistida de provas dissertativas manuscritas (PGC/TCC) |
 | **Decisores** | Autor do PGC + orientador |
-| **Documentos relacionados** | `RESULTADOS-TESTE-PROVAS-REAIS-OCR.md` (evidência empírica Q2), `GUIA-IMPLEMENTACAO.md` (arquitetura de providers), `PLANO-TESTES-VALIDACAO.md` (Fases 0–8) |
+| **Documentos relacionados** | `RESULTADOS-TESTE-PROVAS-REAIS-OCR.md` (evidência empírica Q2, baseline OCR), `RESULTADOS-TESTE-VISION-FASE1.md` (validação da Fase 1, vision), `GUIA-IMPLEMENTACAO.md` (arquitetura de providers), `PLANO-TESTES-VALIDACAO.md` (Fases 0–8) |
 | **Fonte externa** | Relatório "Avaliação De APIs Multimodais Educacionais" (jul/2026) — dados tarifários e comparativos consolidados criticamente neste documento |
 
 > **Nota sobre a fonte externa.** O relatório de entrada é um levantamento gerado com auxílio de IA, com dados tarifários declarados como vigentes em julho de 2026. Este ADR **não** o reproduz literalmente: consolida, reorganiza e critica. Onde os números do relatório conflitam com dados medidos pelo próprio projeto ou com o comportamento conhecido das APIs, a divergência está sinalizada como **[VALIDAR]** — esses pontos devem ser confirmados nas páginas oficiais de preço no início do Q3, antes de qualquer compromisso orçamentário.
@@ -384,13 +384,13 @@ Os sinais `confidence_mean`/`char_doubt_ratio` do Tesseract deixam de existir. S
 
 Plano incremental, cada fase com critério de saída mensurável. O corpus de referência são as 4 provas reais existentes + novas coletas (ampliar para ≥20 respostas manuscritas reais, 2+ escritores, ambos os estilos).
 
-| Fase | Entregável | Atividades | Critério de saída |
-|---|---|---|---|
-| **1. Substituir OCR por LLM Vision** | `vision_provider` no adapter (Gemini primeiro); `GradingResult.transcription`; prompt `somativo_v2_vision` versionado; envio do recorte comprimido | Implementação atrás da fachada existente; provider mock estendido para vision (suíte offline continua verde); flag de rollback para o caminho antigo durante a transição | Pipeline E2E com as 4 provas reais rodando via vision, sidecars completos, sem regressão na suíte (43+ verdes) |
-| **2. Testes comparativos controlados** | Corpus rotulado (transcrição ground-truth + nota humana por rubrica) | Medir CER da transcrição do LMM nas provas reais; medir taxa de alucinação em casos com rasura/ruído; recalibrar `confidence_score` com os novos sinais | CER da transcrição vision ≤10% no corpus real; zero alucinações não sinalizadas pela confiança |
-| **3. Comparativo OCR × HTR × Vision** | Extensão do `experiments/ocr_styles_eval.py` para 3 braços | Tesseract (baseline histórica), TrOCR base (esforço mínimo, sem fine-tuning — documentar limitação PT), LLM Vision; mesmas imagens, mesmas métricas (CER/WER + nota final vs humana) | Tabela comparativa completa para o TCC; decisão de modelo de produção baseada em dados |
-| **4. Custo real medido** | Relatório de custo por questão/turma a partir de `provider_metadata.usage` | Ativar batch + caching; medir hit rate de cache, thinking tokens reais, custo por 100 correções; validar os **[VALIDAR]** deste ADR contra as páginas oficiais | Custo medido por questão com intervalo; premissas do §6 confirmadas ou corrigidas no documento |
-| **5. Resultados estatísticos** | Capítulo de resultados do TCC | Concordância nota-modelo × nota-humana (correlação/kappa ponderado), distribuição de erro por estilo de escrita, taxa de encaminhamento ao HITL antes/depois da migração | Redução mensurável e estatisticamente descrita do volume de HITL vs Q2 (baseline: 100%) |
+| Fase | Status | Entregável | Atividades | Critério de saída |
+|---|---|---|---|---|
+| **1. Substituir OCR por LLM Vision** | ✅ Concluída (2026-09-25, `pgc3/dissertativa-fase1`) | `vision_provider` no adapter (Gemini **e Anthropic**, ambos implementados); `GradingResult.transcription`; prompt `somativo_v2_vision` versionado; envio do recorte comprimido | Implementação atrás da fachada existente; provider mock estendido para vision (suíte offline continua verde); flag de rollback para o caminho antigo durante a transição | ✅ Pipeline E2E com as 4 provas reais rodando via vision, sidecars completos, sem regressão na suíte (55/55 verdes) — ver `RESULTADOS-TESTE-VISION-FASE1.md` |
+| **2. Testes comparativos controlados** | Pendente — depende de corpus ampliado | Corpus rotulado (transcrição ground-truth + nota humana por rubrica) | Medir CER da transcrição do LMM nas provas reais; medir taxa de alucinação em casos com rasura/ruído; recalibrar `confidence_score` com os novos sinais | CER da transcrição vision ≤10% no corpus real; zero alucinações não sinalizadas pela confiança |
+| **3. Comparativo OCR × HTR × Vision** | Pendente | Extensão do `experiments/ocr_styles_eval.py` para 3 braços | Tesseract (baseline histórica), TrOCR base (esforço mínimo, sem fine-tuning — documentar limitação PT), LLM Vision; mesmas imagens, mesmas métricas (CER/WER + nota final vs humana) | Tabela comparativa completa para o TCC; decisão de modelo de produção baseada em dados |
+| **4. Custo real medido** | Pendente | Relatório de custo por questão/turma a partir de `provider_metadata.usage` | Ativar batch + caching; medir hit rate de cache, thinking tokens reais, custo por 100 correções; validar os **[VALIDAR]** deste ADR contra as páginas oficiais | Custo medido por questão com intervalo; premissas do §6 confirmadas ou corrigidas no documento |
+| **5. Resultados estatísticos** | Pendente | Capítulo de resultados do TCC | Concordância nota-modelo × nota-humana (correlação/kappa ponderado), distribuição de erro por estilo de escrita, taxa de encaminhamento ao HITL antes/depois da migração | Redução mensurável e estatisticamente descrita do volume de HITL vs Q2 (baseline: 100%) |
 
 Dependências transversais: conta paga do(s) fornecedor(es) desde a Fase 1 (o free tier de 20 req/dia inviabiliza até o desenvolvimento); revisão LGPD (§9) antes de usar respostas de terceiros no corpus; atualização do `GUIA-TESTE-AO-VIVO.md` quando o caminho vision virar padrão.
 

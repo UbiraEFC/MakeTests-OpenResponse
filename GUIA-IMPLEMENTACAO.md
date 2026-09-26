@@ -469,15 +469,15 @@ A ordem 4a→4b→4c é deliberada: o schema/contrato (4a) é definido **antes**
 
 ## 6. Checklist de pré-requisitos antes de codificar
 
-- [ ] Ambiente WSL funcional (`GUIA-EXECUCAO-WSL.md` §6 — T0.1–T0.4)
-- [ ] `MakeTests.py` gera e corrige questão objetiva de exemplo
-- [ ] Tesseract com `por` instalado (`tesseract --list-langs`)
-- [ ] Schema interno de avaliação definido (`GradingPayload`/`GradingResult` em `schemas.py`)
-- [ ] Provedor padrão inicial escolhido (Gemini) e API key validada
-- [ ] `.env` configurado a partir de `.env.example`, compatível com a abstração de provedor (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, ...)
-- [ ] Rubrica piloto redigida para 1 questão dissertativa de teste
-- [ ] Definição institucional sobre dados de alunos (anonimização)
-- [ ] Política institucional de dados por provedor definida (LGPD, retenção, treinamento) — antes de decidir o provedor de produção
+- [x] Ambiente WSL funcional (`GUIA-EXECUCAO-WSL.md` §6 — T0.1–T0.4)
+- [x] `MakeTests.py` gera e corrige questão objetiva de exemplo
+- [x] Tesseract com `por` instalado (`tesseract --list-langs`)
+- [x] Schema interno de avaliação definido (`GradingPayload`/`GradingResult` em `schemas.py`) — estendido com `image_bytes`/`transcription` na Fase 1 do roadmap Q3 (ADR-001)
+- [x] Provedor padrão inicial escolhido (Gemini) e API key validada — Anthropic adicionado como segundo provedor com vision na Fase 1 do roadmap Q3
+- [x] `.env` configurado a partir de `.env.example`, compatível com a abstração de provedor (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, ...)
+- [x] Rubrica piloto redigida para 1 questão dissertativa de teste
+- [ ] **Definição institucional sobre dados de alunos (anonimização)** — mitigação **técnica** já confirmada em código (o recorte enviado ao provider é só a área de resposta, sem nome/matrícula visível — verificado em `MakeTests.py:findAnswerAreas`, ver ADR-001 §9 e avaliação de segurança da Fase 1). A **decisão institucional formal** (se/como usar respostas reais de terceiros, fora do corpus já anonimizado do Q2) segue pendente — não bloqueia desenvolvimento com dados sintéticos/já anonimizados, mas bloqueia uso em escala com dados reais de uma turma.
+- [ ] **Política institucional de dados por provedor definida (LGPD, retenção, treinamento)** — antes de decidir o provedor de produção em escala institucional (fora do escopo de validação técnica do PGC/TCC). Ainda em aberto.
 
 ---
 
