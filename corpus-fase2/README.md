@@ -10,15 +10,20 @@ respostas manuscritas reais exigido pela Fase 2 do roadmap (`ADR-001-substituica
 | `prova2-bases-matematicas/` | Leitura de fórmulas matemáticas manuscritas | Bhaskara, derivada, Teorema de Pitágoras |
 | `prova3-matematica-discreta/` | Transcrição de notação matemática básica | conjuntos, tabela-verdade, indução matemática |
 
-Cada prova já tem **3 cópias** (`Students.csv` com "Escritor 1/2/3" — identidades fictícias,
-mesma convenção de anonimização do corpus do Q2). 3 provas × 3 cópias × 3 questões = até
-**27 respostas manuscritas**, folga confortável acima do mínimo de 20 do roadmap — desde que
-pelo menos 2 pessoas diferentes preencham cópias distintas (requisito "2+ escritores").
+Cada prova tem **1 "aluno"** só (`Students.csv` com "Escritor 1" — identidade fictícia, mesma
+convenção de anonimização do corpus do Q2). O PDF gerado é um **template de 1 cópia** — o mesmo
+padrão usado no corpus do Q2 (`aed.pdf` também era gerado com 1 "aluno" e impresso 4 vezes para
+virar `provas-pdf/prova1..4.pdf`). Aqui, imprima cada `*_corpus.pdf` quantas vezes forem
+necessárias e distribua os impressos para pessoas diferentes preencherem à mão.
+
+Pra bater o mínimo de "≥20 respostas manuscritas reais, 2+ escritores" do roadmap com 3 questões
+por prova, **~3-4 impressões por prova** (≈9-12 impressões no total, entre pelo menos 2 pessoas
+diferentes) já dá 27-36 respostas — folga confortável. Ajuste livremente pra mais.
 
 ## PDFs gerados (não versionados — regenere se precisar)
 
 ```
-prova1-algoritmos-estruturas-dados/aed_corpus.pdf              # prova em branco, 3 cópias
+prova1-algoritmos-estruturas-dados/aed_corpus.pdf              # prova em branco, 1 cópia (template p/ impressão)
 prova1-algoritmos-estruturas-dados/aed_corpus_gabarito.pdf     # gabarito (enunciados+rubricas)
 prova2-bases-matematicas/matbasica_corpus.pdf
 prova2-bases-matematicas/matbasica_corpus_gabarito.pdf
@@ -36,8 +41,9 @@ python ../../../MakeTests.py -v
 
 ## Próximos passos (fora do escopo automatizável)
 
-1. **Imprimir** os `*_corpus.pdf` (não o gabarito) — cada um tem 3 cópias (uma por "Escritor").
-2. **Distribuir** as cópias para pelo menos 2 pessoas diferentes escreverem à mão — idealmente
+1. **Imprimir** os `*_corpus.pdf` (não o gabarito) — cada um é 1 template; tire quantas cópias
+   físicas quiser (ver recomendação de quantidade acima).
+2. **Distribuir** os impressos para pelo menos 2 pessoas diferentes escreverem à mão — idealmente
    variando estilo de letra (forma/cursiva) entre elas, como no corpus do Q2.
 3. **Digitalizar** (scanner de celular ou de mesa, ~300dpi, como foi feito para `provas-pdf/`).
 4. **Guardar os scans fora do repositório git**, no mesmo padrão de `../provas-pdf/` (dados de
