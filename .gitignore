@@ -13,3 +13,12 @@ test-quick/latex_debug/
 # execução; sobram apenas se o script for interrompido no meio)
 test-quick/gerar_prova_respondida_tmp/
 test-quick/synth_debug/
+
+# Saídas geradas pelas provas do corpus da Fase 2 (roadmap Q3, ADR-001) -
+# os PDFs (Tests + Gabarito) e a pasta de correção são regenerados a partir
+# de config.json/Questions/, não precisam de versionamento. As provas
+# escaneadas reais (depois de impressas/preenchidas/digitalizadas) ficam
+# fora do repo, no mesmo padrão de provas-pdf/ (ver ADR-001 §9, minimização).
+corpus-fase2/*/*.pdf
+corpus-fase2/*/Correcao/
+corpus-fase2/*/latex_debug/

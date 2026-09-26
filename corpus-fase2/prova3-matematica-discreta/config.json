@@ -1,0 +1,57 @@
+{
+  "questions": {
+    "salt": "corpus_fase2_matdiscreta",
+    "db_path": "Questions",
+    "select": [
+      {"path": "Q1_conjuntos", "weight": 1, "replaces": {}},
+      {"path": "Q2_tabela_verdade", "weight": 1, "replaces": {}},
+      {"path": "Q3_inducao", "weight": 1, "replaces": {}}
+    ]
+  },
+  "input": {
+    "filename": "Students.csv",
+    "delimiter": ";",
+    "quotechar": "\""
+  },
+  "output": {
+    "tests": "matdiscreta_corpus.pdf",
+    "answer_key": "matdiscreta_corpus_gabarito.pdf"
+  },
+  "correction": {
+    "path": "Correcao",
+    "csv_file": "notas.csv",
+    "delimiter": ";",
+    "quotechar": "\"",
+    "headers": {
+      "identification": {
+        "%ID%": "Matricula",
+        "%NAME%": "Aluno",
+        "%EMAIL%": "Email"
+      },
+      "counter": "%COUNT%",
+      "intermediate": "Q_%COUNT%",
+      "final": "Nota_Final"
+    },
+    "final_calc": [
+      "final_calc = lambda scores, weights: sum([s*w for s,w in zip(scores, weights)])/sum(weights) if sum(weights)>0 else 0"
+    ]
+  },
+  "tex": {
+    "max_pages": 3,
+    "preamble": "\\documentclass[12pt,a4paper]{article}\\usepackage[utf8]{inputenc}\\usepackage{amsmath}\\usepackage{amssymb}\\usepackage{geometry}\\usepackage{enumitem}\\usepackage{multicol}\\usepackage{graphicx}\\geometry{margin=1in}\\title{Prova de Matematica Discreta (Corpus Fase 2)}\\author{}\\date{}\\begin{document}\\maketitle",
+    "termination": "\\end{document}",
+    "test": {
+      "header": "Nome: %NAME% (ID: %ID%)",
+      "before": "",
+      "after": "\\",
+      "footer": ""
+    },
+    "answer_key": {
+      "header": "GABARITO",
+      "before": "",
+      "answer": "Resposta: %ANSWER_TEXT%",
+      "after": "",
+      "footer": ""
+    }
+  }
+}
