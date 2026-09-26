@@ -1462,10 +1462,14 @@ class QuestionDissertative(Question):
 		import numpy as np
 		import os
 
-		# Fase 2/3: extração OCR + normalização (modo legado, LLM_VISION_MODE=
-		# off). Roadmap Q3 Fase 1 (ADR-001): LLM_VISION_MODE=on pula OCR e
-		# envia a imagem diretamente ao provider (mesmo ponto de wiring -
-		# só muda a origem do payload). Fase 4: avaliação semântica via
+		# Roadmap Q3 Fase 1 (ADR-001): caminho vision é o default de produção
+		# desde o fechamento da fase (critério de saída: E2E nas 4 provas
+		# reais + regressão de prompt injection, ambos verdes - ver
+		# RESULTADOS-TESTE-PROVAS-REAIS-OCR.md/validate-maketests.sh). Envia a
+		# imagem do recorte diretamente ao provider, pulando OCR/normalize.
+		# LLM_VISION_MODE=off é o rollback para o caminho legado (Fase 2/3:
+		# extração OCR + normalização) caso seja preciso reverter. Fase 4:
+		# avaliação semântica via
 		# maketests_ext/llm_grader.py — fachada que esconde qual provedor
 		# está ativo (LLM_PROVIDER; default "mock", sem credencial). Fase 5:
 		# score de confiança heurístico, agregando sinais de OCR e LLM — não
@@ -1474,7 +1478,7 @@ class QuestionDissertative(Question):
 		# sidecar JSON por aluno/questão (review_hitl.py consome esse sidecar).
 		from maketests_ext.llm.provider_factory import ensure_dotenv_loaded
 		ensure_dotenv_loaded()
-		vision_mode = os.environ.get("LLM_VISION_MODE", "off").strip().lower() == "on"
+		vision_mode = os.environ.get("LLM_VISION_MODE", "on").strip().lower() == "on"
 
 		from maketests_ext.llm_grader import grade
 		from maketests_ext.llm.schemas import GradingPayload
