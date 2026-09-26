@@ -1,6 +1,11 @@
 from MakeTests import QuestionDissertative
 
 class QuestionBhaskara(QuestionDissertative):
+	# Resposta tem 3 passos matematicos (Delta, formula, x1/x2) - 1 linha a
+	# mais que o padrao (6->7) para dar folga sem comprimir o espacamento
+	# (~7,17mm/linha, ainda dentro da faixa calibrada no Q2).
+	lines = 7
+
 	def makeSetup(self):
 		self.statement = (
 			"Resolva a equacao do segundo grau $2x^{2} - 3x - 5 = 0$ utilizando a formula de "

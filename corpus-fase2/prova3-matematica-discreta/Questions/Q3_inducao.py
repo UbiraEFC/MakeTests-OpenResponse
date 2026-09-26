@@ -1,6 +1,11 @@
 from MakeTests import QuestionDissertative
 
 class QuestionInducao(QuestionDissertative):
+	# Enunciado do principio + 3 casos de verificacao (n=1,2,3): 2 linhas a
+	# mais que o padrao (6->8), ainda a ~6,37mm/linha (dentro da margem de
+	# seguranca sobre o x-height tipico de 3-5mm registrada no Q2).
+	lines = 8
+
 	def makeSetup(self):
 		self.statement = (
 			"Enuncie, de forma geral, o Principio da Inducao Matematica. Em seguida, verifique "
