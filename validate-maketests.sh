@@ -728,6 +728,10 @@ PYEOF
 # provas-pdf/resultados/provaN/*/Q_2_assist.json - não como assert automático
 # (não há gabarito humano formal), como evidência qualitativa imediata e
 # insumo para a Fase 2 do roadmap (testes comparativos controlados).
+#
+# LLM_PROVIDER não é fixado aqui: usa o que estiver em .env/ambiente (gemini
+# ou anthropic - ambos suportam vision desde a Fase 1/3 do roadmap), para
+# dar liberdade de rodar com qualquer provider que tenha cota disponível.
 ################################################################################
 validate_vision_fase1_live() {
     local provas_dir="${PROVAS_PDF_DIR:-$MAKETESTS_DIR/../provas-pdf}"
@@ -736,7 +740,7 @@ validate_vision_fase1_live() {
         return 1
     fi
 
-    (cd "$MAKETESTS_DIR" && LLM_PROVIDER=gemini LLM_VISION_MODE=on PROVAS_DIR="$provas_dir" python3 - <<'PYEOF'
+    (cd "$MAKETESTS_DIR" && LLM_VISION_MODE=on PROVAS_DIR="$provas_dir" python3 - <<'PYEOF'
 import glob
 import json
 import os
@@ -796,11 +800,12 @@ PYEOF
 # sintética via gerar_prova_respondida.py, contra a API real (não precisa do
 # corpus de provas-pdf/ - gera a imagem na hora). 1 chamada real.
 # Uso: bash -c 'source validate-maketests.sh; validate_vision_prompt_injection_live'
+# LLM_PROVIDER não é fixado aqui: usa o que estiver em .env/ambiente.
 ################################################################################
 validate_vision_prompt_injection_live() {
     local fixture
     fixture="$(mktemp -d)"
-    (cd "$MAKETESTS_DIR" && LLM_PROVIDER=gemini LLM_VISION_MODE=on FIXTURE_DIR="$fixture" python3 - <<'PYEOF'
+    (cd "$MAKETESTS_DIR" && LLM_VISION_MODE=on FIXTURE_DIR="$fixture" python3 - <<'PYEOF'
 import json
 import os
 import shutil
