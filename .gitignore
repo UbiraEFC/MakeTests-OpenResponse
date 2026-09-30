@@ -20,5 +20,5 @@ test-quick/synth_debug/
 # escaneadas reais (depois de impressas/preenchidas/digitalizadas) ficam
 # fora do repo, no mesmo padrão de provas-pdf/ (ver ADR-001 §9, minimização).
 corpus-fase2/*/*.pdf
-corpus-fase2/*/Correcao/
+corpus-fase2/*/Correcao*/
 corpus-fase2/*/latex_debug/
