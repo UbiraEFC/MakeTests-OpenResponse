@@ -1,0 +1,64 @@
+{
+  "questions": {
+    "salt": "teste_aed",
+    "db_path": "Questions",
+    "select": [
+      {
+        "path": "Easy/alternative_example",
+        "weight": 1,
+        "replaces": {}
+      },
+      {
+        "path": "Hard/dissertative_example",
+        "weight": 1,
+        "replaces": {}
+      }
+    ]
+  },
+  "input": {
+    "filename": "Students.csv",
+    "delimiter": ";",
+    "quotechar": "\""
+  },
+  "output": {
+    "tests": "aed.pdf",
+    "answer_key": "aed_gabarito.pdf"
+  },
+  "correction": {
+    "path": "Correcao",
+    "csv_file": "notas.csv",
+    "delimiter": ";",
+    "quotechar": "\"",
+    "headers": {
+      "identification": {
+        "%ID%": "Matricula",
+        "%NAME%": "Aluno",
+        "%EMAIL%": "Email"
+      },
+      "counter": "%COUNT%",
+      "intermediate": "Q_%COUNT%",
+      "final": "Nota_Final"
+    },
+    "final_calc": [
+      "final_calc = lambda scores, weights: sum([s*w for s,w in zip(scores, weights)])/sum(weights) if sum(weights)>0 else 0"
+    ]
+  },
+  "tex": {
+    "max_pages": 2,
+    "preamble": "\\documentclass[12pt,a4paper]{article}\\usepackage[utf8]{inputenc}\\usepackage{geometry}\\usepackage{enumitem}\\usepackage{multicol}\\usepackage{graphicx}\\geometry{margin=1in}\\title{Prova de Algoritmos e Estruturas de Dados}\\author{}\\date{}\\begin{document}\\maketitle",
+    "termination": "\\end{document}",
+    "test": {
+      "header": "Nome: %NAME% (ID: %ID%)",
+      "before": "",
+      "after": "\\",
+      "footer": ""
+    },
+    "answer_key": {
+      "header": "GABARITO",
+      "before": "",
+      "answer": "Resposta: %ANSWER_TEXT%",
+      "after": "",
+      "footer": ""
+    }
+  }
+}
