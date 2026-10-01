@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |---|---|
-| **Status** | Corpus de 2 escritores processado; critério "2+ escritores" do roadmap atendido |
+| **Status** | Fase 2 do roadmap concluída: corpus de 2 escritores, CER 6.4–8.2% (≤10%), zero alucinações não sinalizadas, correlação nota humana×modelo 0.943 (ver §7) |
 | **Data** | 2026-09-30 |
 | **Branch** | `pgc3/dissertativa-fase1` |
 | **Contexto** | Ampliação do corpus real da Fase 2 (`ADR-001-substituicao-ocr-por-llm-vision.md` §11) com 3 provas novas × 3 questões, preparadas em `corpus-fase2/` |
@@ -171,7 +171,97 @@ marcador com raio muito fora da faixa esperada (ex.: >3-4x o raio mediano dos de
 na mesma imagem) antes de tentar parear seções — reduziria a chance desse tipo de falso positivo
 sem exigir mudança na geometria dos templates já impressos.
 
-## 7. Observações gerais
+## 7. Validação com transcrição ground-truth e nota humana (fecho da Fase 2)
+
+Complementando o §5 (inspeção qualitativa de 1 caso), esta seção mede os dois critérios de saída
+formais da Fase 2 (ADR-001 §11) contra as 18 respostas: **CER da transcrição** e **coerência
+nota-humana × nota-modelo**.
+
+### 7.1 Metodologia
+
+- Transcrição manual verbatim das 18 respostas (preservando erros, abreviações e comandos LaTeX
+  escritos à mão) e nota humana por critério de rubrica, registradas em
+  `provas-corpus-pt2/correcao-manual.md` (fora do repo, mesmo padrão de minimização de dados do
+  ADR §9).
+- CER calculado por distância de Levenshtein a nível de caractere, após normalização apenas de
+  espaços em branco (sem normalizar maiúsculas/pontuação/símbolos — CER "bruto").
+- Nota humana atribuída de forma independente, pelos mesmos critérios de rubrica usados no prompt
+  do modelo, antes de qualquer consulta ao sidecar gerado.
+
+### 7.2 CER por resposta
+
+| Resposta | CER (%) | Nota humana | Nota modelo | \|Δ nota\| |
+|---|---:|---:|---:|---:|
+| aed-lari Q1 | 2.6 | 65 | 60 | 5 |
+| aed-lari Q2 | 0.0 | 100 | 100 | 0 |
+| aed-lari Q3 | 0.0 | 65 | 65 | 0 |
+| aed-ubi Q1 | 1.2 | 80 | 70 | 10 |
+| aed-ubi Q2 | 0.7 | 100 | 100 | 0 |
+| aed-ubi Q3 | 0.0 | 50 | 60 | 10 |
+| bm-lari Q1 | 13.3 | 65 | 40 | 25 |
+| bm-lari Q2 | 0.8 | 45 | 45 | 0 |
+| bm-lari Q3 | 25.4 | 100 | 100 | 0 |
+| bm-ubi Q1 | 15.1 | 100 | 100 | 0 |
+| bm-ubi Q2 | 4.1 | 85 | 90 | 5 |
+| bm-ubi Q3 | 0.0 | 100 | 100 | 0 |
+| matdis-lari Q1 | 29.9 | 100 | 100 | 0 |
+| matdis-lari Q2 | 14.9 | 65 | 65 | 0 |
+| matdis-lari Q3 | 17.1 | 45 | 35 | 10 |
+| matdis-ubi Q1 | 9.3 | 65 | 67 | 2 |
+| matdis-ubi Q2 | 1.4 | 25 | 35 | 10 |
+| matdis-ubi Q3 | 12.5 | 90 | 100 | 10 |
+
+**CER agregado:** 6.4% (micro — soma das distâncias / soma dos caracteres) | 8.2% (macro — média
+simples por resposta). Ambos **abaixo do limiar de 10%** do critério de saída da Fase 2.
+
+**Coerência de nota:** correlação de Pearson entre nota humana e nota do modelo = **0.943**;
+diferença média absoluta de 4.8 pontos (escala 0–100); 17 das 18 respostas com diferença ≤10
+pontos; a única divergência maior (25 pontos) é a própria resposta já sinalizada como de baixa
+confiança (bm-lari Q1, §5) — ou seja, o único caso em que o modelo "errou mais a nota" é
+exatamente o caso que a rede de segurança (`confidence_score`/`review_recommended`) já havia
+marcado para revisão humana.
+
+### 7.3 Por que o CER varia tanto entre respostas — nem todo erro é alucinação
+
+As respostas com CER mais alto (bm-lari Q3: 25.4%, matdis-lari Q1: 29.9%, bm-ubi Q1: 15.1%,
+matdis-lari Q2: 14.9%) **não são leitura errada do conteúdo** — são divergência de notação entre a
+convenção de transcrição literal (preservar `\cup`, `\c dot`, `a^2`, pontos como marcador de
+multiplicação) e a tendência do modelo de **normalizar notação matemática manuscrita para o
+símbolo/forma pretendida** (`\cup`→∪, `a^2`→a², `.`→`·`). O conteúdo numérico e lógico está
+correto nesses casos; o que diverge é a forma de representar o símbolo.
+
+Isolando os erros que são leitura genuinamente incorreta (não notação):
+
+- **bm-lari Q1** — `\d frac`→"proc" e `\c dot`→"|c dot" (já documentado no §5): o único caso em
+  que a notação quebrada de fato prejudicou a legibilidade, e o único em que o sistema sinalizou
+  baixa confiança corretamente.
+- **aed-ubi Q2** — "intercalação"→"interpolação": troca de palavra real, mas sem efeito na nota
+  (ambas 100 — o rubric_coverage não depende dessa palavra específica).
+- **bm-ubi Q2** — "Regra"→"R'gra": erro de caractere isolado, sem efeito semântico.
+- **matdis-ubi Q3** — "prova-se"→"Provasse": troca de forma verbal, sem efeito na nota.
+- **matdis-lari Q3** — o modelo transcreveu o trecho riscado pelo aluno (`~~(n=2 e n=3)~~`) em vez
+  de ignorá-lo — achado novo: **o modelo não distingue texto riscado de texto válido**, lê
+  qualquer tinta na página. Não chega a ser alucinação (o texto riscado existe no papel), mas é
+  uma lacuna a registrar: hoje nada no prompt instrui o modelo a tratar riscos/tachados como
+  conteúdo descartado pelo aluno.
+
+**Nenhuma das 18 respostas apresentou conteúdo inventado** (frase, valor ou símbolo sem
+correspondência nenhuma no manuscrito) — zero alucinações no sentido estrito do critério de saída
+da Fase 2.
+
+### 7.4 Veredito frente ao critério de saída da Fase 2
+
+| Critério (ADR-001 §11) | Medido | Resultado |
+|---|---|---|
+| CER da transcrição vision ≤10% no corpus real | 6.4% (micro) / 8.2% (macro) | ✅ Atendido |
+| Zero alucinações não sinalizadas pela confiança | 0 alucinações; o único erro relevante (bm-lari Q1) foi sinalizado | ✅ Atendido |
+
+Com N=18 (mais as 4 provas do Q2 baseline), a Fase 2 do roadmap está **concluída** nos dois
+critérios formais definidos no ADR. A recalibração de `confidence_score` com os novos sinais
+(mencionada como atividade da fase) fica como item aberto, não bloqueante — o teto estrutural de
+75 pontos (§7 abaixo) já é um candidato identificado para essa recalibração.
+
+## 8. Observações gerais
 
 - **Distribuição de confiança:** 37 (mínimo, caso do §5) a 75 (máximo, teto estrutural do modo
   vision — toda resposta perde 25 pontos fixos por não ter sinal de OCR, ver explicação de
@@ -185,20 +275,34 @@ sem exigir mudança na geometria dos templates já impressos.
   (Bhaskara, 100 vs. 40) reflete diferença real de conteúdo/clareza da resposta, não
   inconsistência do modelo — confirmado por inspeção visual direta.
 
-## 8. Limitações
+## 9. Limitações
 
-- N ainda pequeno para conclusões estatísticas: 2 escritores, 9 questões cada, 18 respostas totais
-  (mais as 4 provas do Q2 = 22 respostas reais no total do projeto).
+- N ainda pequeno para conclusões estatísticas fortes: 2 escritores, 9 questões cada, 18 respostas
+  com ground-truth (mais as 4 provas do Q2 = 22 respostas reais no total do projeto).
 - Ambos os escritores usaram letra de forma/cursiva legível; o corpus ainda não cobre casos de
   caligrafia muito degradada ou rasuras extensas.
 - Achado do §6 foi contornado manualmente para esta rodada; a detecção em si não foi corrigida no
   código — próxima resposta tabular no corpus pode reproduzir o mesmo problema.
+- CER medido é "bruto" (sem normalizar símbolo matemático/notação) — como discutido no §7.3, uma
+  parcela relevante do CER medido reflete escolha de representação (unicode vs. LaTeX literal), não
+  erro de leitura; um CER "normalizado" (equivalência semântica de símbolos) tenderia a ficar ainda
+  mais baixo, mas não foi calculado aqui.
+- A convenção de transcrição ground-truth preserva literalmente comandos LaTeX manuscritos
+  quebrados; o modelo, em vez disso, tende a semanticamente corrigi-los para o símbolo pretendido
+  (exceto no caso bm-lari Q1, onde a notação estava confusa demais e ele preservou o texto bruto).
+  Esse comportamento é inconsistente entre casos e seria um ponto a investigar com mais dados na
+  Fase 3.
 
-## 9. Conclusão
+## 10. Conclusão
 
 Critério "2+ escritores" da Fase 2 do roadmap (ADR-001 §11) **atendido**: 18 respostas manuscritas
 reais de 2 pessoas diferentes, em 3 domínios de conteúdo (prosa técnica, fórmulas matemáticas,
-notação discreta). A avaliação por rubrica permaneceu consistente e conservadora entre os dois
-escritores, incluindo um caso genuinamente difícil (LaTeX escrito à mão) tratado corretamente pela
-rede de segurança existente. Um novo modo de falha da detecção de área de resposta foi identificado,
-documentado e contornado — candidato a item de robustez para antes da Fase 3 do roadmap.
+notação discreta). Os dois critérios formais de saída da fase também foram **atendidos** (§7.4):
+CER de 6.4–8.2%, abaixo do limiar de 10%, e zero alucinações não sinalizadas pela confiança — a
+única resposta com erro de leitura relevante foi corretamente marcada para revisão humana pelo
+próprio sistema. A avaliação por rubrica permaneceu consistente e conservadora entre os dois
+escritores (correlação de 0.943 entre nota humana e nota do modelo), incluindo um caso
+genuinamente difícil (LaTeX escrito à mão) tratado corretamente pela rede de segurança existente.
+Um novo modo de falha da detecção de área de resposta foi identificado, documentado e contornado —
+candidato a item de robustez para antes da Fase 3 do roadmap. **Com isso, a Fase 2 do roadmap do
+ADR-001 está concluída.**
