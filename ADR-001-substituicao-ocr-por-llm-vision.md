@@ -4,7 +4,7 @@
 
 | Campo | Valor |
 |---|---|
-| **Status** | Aceito — Fases 1 e 2 do roadmap (§11) implementadas e validadas (2026-09-25 e 2026-09-30, branch `pgc3/dissertativa-fase1`); `LLM_VISION_MODE=on` é o caminho de produção default. Fases 3–5 seguem propostas, dependentes de comparativo com outros métodos e de volume maior de correções. |
+| **Status** | Aceito — Fases 1, 2 e 4 do roadmap (§11) implementadas e validadas (2026-09-25 e 2026-09-30, branch `pgc3/dissertativa-fase1`); Fase 3 deliberadamente não realizada (decisão justificada, ver §11). `LLM_VISION_MODE=on` é o caminho de produção default. Fase 5 (capítulo de resultados do TCC) segue pendente. |
 | **Data** | 2026-07-15 (decisão original) — validação experimental da Fase 1 em 2026-09-25 |
 | **Contexto do projeto** | MakeTests — extensão para correção assistida de provas dissertativas manuscritas (PGC/TCC) |
 | **Decisores** | Autor do PGC + orientador |
@@ -243,7 +243,7 @@ Anatomia típica de uma chamada de correção (premissas do relatório, validada
 | Metadados por aluno | ~100 | Não | Marginal |
 | Imagem (recorte 800×600) | 560–765 (médio) | Não | Componente dominante da entrada com cache ativo |
 | Saída JSON | 50–80 | — | Componente dominante do **custo** (preço/token maior) |
-| Raciocínio (thinking) | 0–800+ | — | **[VALIDAR — ver 6.6]** |
+| Raciocínio (thinking) | 0–800+ | — | Confirmado com dados reais — ver §6.7. Domina o custo de saída na maioria das chamadas medidas |
 
 ### 6.5 Custos simulados (cenários da consulta)
 
@@ -265,10 +265,21 @@ Premissas (relatório, cenário "Custo Médio"): recorte 800×600; rubrica de 15
 
 ### 6.6 Divergências entre o relatório e os dados medidos pelo projeto
 
-1. **Tokens de raciocínio ignorados na simulação.** O relatório assume 50–80 tokens de saída. A chamada real do projeto (Gemini 2.5 Flash, prompt `somativo_v1`) registrou `thoughtsTokenCount=791` além dos 60 de saída — **~10× a premissa**, cobrados como saída. Impacto absoluto pequeno (≈ R$ 0,011/questão ainda), mas a premissa deve ser corrigida: em modelos com raciocínio ativo, **o thinking domina o custo**, não o JSON. Mitigação: configurar `thinking_level`/orçamento de raciocínio explicitamente no Q3 e medir.
-2. **GPT-4o-mini e multiplicador de imagem** — ver §5.1. A posição de "mais barato" pode não sobreviver ao custo real de imagem.
-3. **Preços e nomes de modelos** (GPT-5.x, Gemini 3.x, Sonnet 5, preço introdutório com data) são declarações do relatório sobre um mercado que muda mensalmente — revalidar todos no início do Q3 contra as páginas oficiais. O relatório contém artefatos de geração automática (ex.: um disclaimer médico espúrio), reforçando a necessidade de conferência primária.
-4. **Câmbio fixo** (5,0925) é premissa pontual; usar faixa (±10%) em qualquer orçamento formal.
+1. **Tokens de raciocínio ignorados na simulação.** O relatório assume 50–80 tokens de saída. A chamada real do projeto (Gemini 2.5 Flash, prompt `somativo_v1`) registrou `thoughtsTokenCount=791` além dos 60 de saída — **~10× a premissa**, cobrados como saída. **Confirmado com 22 amostras reais na Fase 4** (§6.7): o thinking domina o custo de saída na maioria das chamadas (até 184/465 tokens médios na Anthropic, até ~870/870 na Gemini) — mitigação de configurar `thinking_level` explicitamente permanece válida e passa a ser prioritária.
+2. **GPT-4o-mini e multiplicador de imagem** — ver §5.1. A posição de "mais barato" pode não sobreviver ao custo real de imagem. Não medido com dado real (nenhuma chamada do projeto usou OpenAI) — segue como suposição.
+3. **Preços e nomes de modelos** — **revalidado na Fase 4** (§6.7, 2026-09-30) direto nas páginas oficiais: preço do Gemini 2.5 Flash confirmado exato; preço oficial do Claude Sonnet 5 obtido (US$2,00/US$10,00 por MTok de entrada/saída — a estimativa "intro" do §6.5 estava ~3x subestimada, corrigida em §6.7).
+4. **Câmbio fixo** (5,0925) é premissa pontual; usar faixa (±10%) em qualquer orçamento formal. Câmbio do dia da Fase 4 (5,20) ficou dentro dessa margem.
+
+### 6.7 Custo real medido (Fase 4 do roadmap, 2026-09-30)
+
+A Fase 4 do roadmap (§11) mediu o custo real das chamadas já feitas nas Fases 1–2, a partir do campo `provider_metadata.usage` já persistido em 22 sidecars reais — sem precisar de nenhuma chamada de API nova. Resultado completo em `RESULTADOS-TESTE-CUSTO-FASE4.md`.
+
+| | N | Custo real/questão |
+|---|---:|---:|
+| Anthropic Sonnet 5 (vision, corpus Fase 2) | 18 | R$ 0,0375 |
+| Gemini 2.5 Flash (texto, pipeline legado Q2) | 4 | R$ 0,0118 |
+
+O custo real do Anthropic ficou **~3x acima** da estimativa "intro" do §6.5 (R$0,0375 vs. R$0,0116) — majoritariamente por tokens de *thinking* não contemplados na simulação original. Mesmo assim, projetando para 1.000 alunos × 5 questões, o custo fica em ~R$188 (~R$0,19/aluno) — a leitura executiva do §6.5 ("custo não é fator limitante") **permanece válida**; o que mudou foi a magnitude exata da estimativa, não a conclusão. Nenhuma das 18 chamadas reais usou prompt caching (`cache_read_input_tokens=0` em todas) — a economia projetada de cache no prefixo estático é teórica, não medida; ativação e medição real de cache seguem como item aberto, não bloqueante. Gap registrado: sem dado real de Gemini em modo vision (quota do free tier esgotada antes do teste live) — comparação cross-provider aqui é vision×texto, não vision×vision.
 
 ---
 
@@ -389,7 +400,7 @@ Plano incremental, cada fase com critério de saída mensurável. O corpus de re
 | **1. Substituir OCR por LLM Vision** | ✅ Concluída (2026-09-25, `pgc3/dissertativa-fase1`) | `vision_provider` no adapter (Gemini **e Anthropic**, ambos implementados); `GradingResult.transcription`; prompt `somativo_v2_vision` versionado; envio do recorte comprimido | Implementação atrás da fachada existente; provider mock estendido para vision (suíte offline continua verde); flag de rollback para o caminho antigo durante a transição | ✅ Pipeline E2E com as 4 provas reais rodando via vision, sidecars completos, sem regressão na suíte (55/55 verdes) — ver `RESULTADOS-TESTE-VISION-FASE1.md` |
 | **2. Testes comparativos controlados** | ✅ Concluída (2026-09-30) — CER 6,4–8,2% (≤10%), zero alucinações não sinalizadas, correlação nota humana×modelo 0,943 (N=18, 2 escritores) | Corpus rotulado (transcrição ground-truth + nota humana por rubrica) | Medir CER da transcrição do LMM nas provas reais; medir taxa de alucinação em casos com rasura/ruído; recalibrar `confidence_score` com os novos sinais (item aberto, não bloqueante) | ✅ CER da transcrição vision ≤10% no corpus real; zero alucinações não sinalizadas pela confiança — ver `RESULTADOS-TESTE-CORPUS-FASE2.md` §7 |
 | **3. Comparativo OCR × HTR × Vision** | ⏭️ Não realizada — decisão justificada (2026-09-30, ver nota abaixo) | Extensão do `experiments/ocr_styles_eval.py` para 3 braços | Tesseract (baseline histórica), TrOCR base (esforço mínimo, sem fine-tuning — documentar limitação PT), LLM Vision; mesmas imagens, mesmas métricas (CER/WER + nota final vs humana) | Tabela comparativa completa para o TCC; decisão de modelo de produção baseada em dados |
-| **4. Custo real medido** | Pendente | Relatório de custo por questão/turma a partir de `provider_metadata.usage` | Ativar batch + caching; medir hit rate de cache, thinking tokens reais, custo por 100 correções; validar os **[VALIDAR]** deste ADR contra as páginas oficiais | Custo medido por questão com intervalo; premissas do §6 confirmadas ou corrigidas no documento |
+| **4. Custo real medido** | ✅ Concluída (2026-09-30) — custo real/questão: R$0,0375 (Anthropic, vision) / R$0,0118 (Gemini, texto legado); preços oficiais revalidados | Relatório de custo por questão/turma a partir de `provider_metadata.usage` | Medir thinking tokens reais e custo por questão a partir dos 22 sidecars já existentes; validar os preços oficiais. Ativação real de cache/batch com medição de hit rate fica como item aberto, não bloqueante (nenhuma das 18 chamadas reais usou cache) | ✅ Custo medido por questão com dado real (não simulado); premissas do §6 confirmadas (Gemini) ou corrigidas (Anthropic, ~3x acima da estimativa intro) — ver `RESULTADOS-TESTE-CUSTO-FASE4.md` |
 | **5. Resultados estatísticos** | Pendente | Capítulo de resultados do TCC | Concordância nota-modelo × nota-humana (correlação/kappa ponderado), distribuição de erro por estilo de escrita, taxa de encaminhamento ao HITL antes/depois da migração | Redução mensurável e estatisticamente descrita do volume de HITL vs Q2 (baseline: 100%) |
 
 Dependências transversais: conta paga do(s) fornecedor(es) desde a Fase 1 (o free tier de 20 req/dia inviabiliza até o desenvolvimento); revisão LGPD (§9) antes de usar respostas de terceiros no corpus; atualização do `GUIA-TESTE-AO-VIVO.md` quando o caminho vision virar padrão.
