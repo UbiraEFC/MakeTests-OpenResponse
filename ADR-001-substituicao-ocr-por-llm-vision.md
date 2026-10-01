@@ -388,11 +388,26 @@ Plano incremental, cada fase com critério de saída mensurável. O corpus de re
 |---|---|---|---|---|
 | **1. Substituir OCR por LLM Vision** | ✅ Concluída (2026-09-25, `pgc3/dissertativa-fase1`) | `vision_provider` no adapter (Gemini **e Anthropic**, ambos implementados); `GradingResult.transcription`; prompt `somativo_v2_vision` versionado; envio do recorte comprimido | Implementação atrás da fachada existente; provider mock estendido para vision (suíte offline continua verde); flag de rollback para o caminho antigo durante a transição | ✅ Pipeline E2E com as 4 provas reais rodando via vision, sidecars completos, sem regressão na suíte (55/55 verdes) — ver `RESULTADOS-TESTE-VISION-FASE1.md` |
 | **2. Testes comparativos controlados** | ✅ Concluída (2026-09-30) — CER 6,4–8,2% (≤10%), zero alucinações não sinalizadas, correlação nota humana×modelo 0,943 (N=18, 2 escritores) | Corpus rotulado (transcrição ground-truth + nota humana por rubrica) | Medir CER da transcrição do LMM nas provas reais; medir taxa de alucinação em casos com rasura/ruído; recalibrar `confidence_score` com os novos sinais (item aberto, não bloqueante) | ✅ CER da transcrição vision ≤10% no corpus real; zero alucinações não sinalizadas pela confiança — ver `RESULTADOS-TESTE-CORPUS-FASE2.md` §7 |
-| **3. Comparativo OCR × HTR × Vision** | Pendente | Extensão do `experiments/ocr_styles_eval.py` para 3 braços | Tesseract (baseline histórica), TrOCR base (esforço mínimo, sem fine-tuning — documentar limitação PT), LLM Vision; mesmas imagens, mesmas métricas (CER/WER + nota final vs humana) | Tabela comparativa completa para o TCC; decisão de modelo de produção baseada em dados |
+| **3. Comparativo OCR × HTR × Vision** | ⏭️ Não realizada — decisão justificada (2026-09-30, ver nota abaixo) | Extensão do `experiments/ocr_styles_eval.py` para 3 braços | Tesseract (baseline histórica), TrOCR base (esforço mínimo, sem fine-tuning — documentar limitação PT), LLM Vision; mesmas imagens, mesmas métricas (CER/WER + nota final vs humana) | Tabela comparativa completa para o TCC; decisão de modelo de produção baseada em dados |
 | **4. Custo real medido** | Pendente | Relatório de custo por questão/turma a partir de `provider_metadata.usage` | Ativar batch + caching; medir hit rate de cache, thinking tokens reais, custo por 100 correções; validar os **[VALIDAR]** deste ADR contra as páginas oficiais | Custo medido por questão com intervalo; premissas do §6 confirmadas ou corrigidas no documento |
 | **5. Resultados estatísticos** | Pendente | Capítulo de resultados do TCC | Concordância nota-modelo × nota-humana (correlação/kappa ponderado), distribuição de erro por estilo de escrita, taxa de encaminhamento ao HITL antes/depois da migração | Redução mensurável e estatisticamente descrita do volume de HITL vs Q2 (baseline: 100%) |
 
 Dependências transversais: conta paga do(s) fornecedor(es) desde a Fase 1 (o free tier de 20 req/dia inviabiliza até o desenvolvimento); revisão LGPD (§9) antes de usar respostas de terceiros no corpus; atualização do `GUIA-TESTE-AO-VIVO.md` quando o caminho vision virar padrão.
+
+**Nota sobre a Fase 3 (decisão de 2026-09-30, não realizada deliberadamente).** Avaliado o
+custo/benefício antes de implementar: o único resultado genuinamente novo que a Fase 3
+acrescentaria é a confirmação empírica de que TrOCR (HTR) performa mal em PT-BR sem
+fine-tuning — um resultado já esperado e já fundamentado por literatura/raciocínio técnico no
+§4.4 (HTR exige fine-tuning, GPU e corpus próprio em PT-BR, explicitamente fora de escopo desde
+o Q1). Os dois braços que importam para a decisão arquitetural do projeto — OCR (Tesseract) e
+LLM Vision — já têm medição empírica real e fechada: CER 58–73% (Tesseract, provas do Q2,
+`RESULTADOS-TESTE-PROVAS-REAIS-OCR.md` §5) vs. CER 6,4–8,2% (Vision, Fase 2,
+`RESULTADOS-TESTE-CORPUS-FASE2.md` §7). Implementar o braço TrOCR exigiria uma dependência nova e
+pesada (`torch`+`transformers`, download de ~1,4 GB de pesos) só para confirmar um resultado
+negativo previsível, sem mudar a decisão do ADR. Optou-se por manter a justificativa de exclusão
+do HTR como argumentativa (literatura + análise técnica, §4.4), não empírica, e redirecionar o
+esforço para a Fase 4 (custo real) e Fase 5 (resultados estatísticos), que têm ganho direto maior
+para o capítulo de resultados do TCC.
 
 ---
 
