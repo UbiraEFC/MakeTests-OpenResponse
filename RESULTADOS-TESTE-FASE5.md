@@ -84,3 +84,13 @@ As duas respostas encaminhadas pela versão recalibrada são exatamente as duas 
 ## 8. Conclusão
 
 Critério de saída da Fase 5 (ADR-001 §11) **atendido**: redução mensurável e estatisticamente descrita do volume de HITL — de 100% no Q2 (OCR) para 11% com LLM Vision recalibrado, sem perder a única revisão necessária do corpus —, com concordância alta entre nota do modelo e nota humana (Pearson 0,943, kappa ponderado 0,879, MAE 4,8 pontos) e sem diferença relevante de erro de nota entre letra de forma e cursiva. A recalibração do score de confiança, pendente desde a Fase 2, foi implementada e coberta por testes. **Com isso, o roadmap do ADR-001 está concluído** (Fases 1, 2, 4 e 5 entregues; Fase 3 não realizada por decisão justificada).
+
+## 9. Adendo (2026-11-14) — revisão do TCC
+
+### 9.1 Comparação pareada do HITL
+
+Os 100% do Q2 vêm de outro conjunto (4 provas, caminho OCR); a comparação pareada é **56% → 11%** nas mesmas 18 respostas. Aplicando a fórmula recalibrada (`maketests_ext/confidence_score.compute`) às 4 provas do Q2 lidas por vision (VISION-FASE1 §4: `review_recommended=false`, 1 de 3 critérios atendidos): confiança **87 (alta)**, **0 de 4** encaminhadas. Sem nota humana por critério para essas provas, precisão e recall não são calculáveis ali.
+
+### 9.2 Verificação de fumaça da branch de entrega
+
+Em 2026-11-14, `pgc3/entrega-final` com API real (Anthropic, Sonnet 5) sobre os recortes de A-AED Q1–Q3: notas 75 / 100 / 45 (humana 80 / 100 / 50), nenhuma encaminhada; regressão TL.1 de prompt injection OK. Na execução do corpus (§4) as mesmas respostas tiveram 70 / 100 / 60 — **variação de até 15 pontos entre execuções** sobre a mesma imagem (A-AED Q3). Não entra nas métricas do corpus; reforça a limitação de execução única por resposta.

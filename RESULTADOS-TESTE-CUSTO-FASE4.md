@@ -93,3 +93,17 @@ Mesmo no cenário mais caro medido (Anthropic, 1.000 alunos), o custo por aluno 
 ## 9. Conclusão
 
 Critério de saída da Fase 4 (ADR-001 §11) **atendido**: custo medido por questão com dado real (não simulado) para dois fornecedores, e as premissas do §6 revisadas — uma confirmada (preço Gemini), duas corrigidas com evidência (custo real Anthropic ~3x a estimativa "intro"; domínio de *thinking* no custo, antes hipótese de 1 amostra, agora confirmado com 22). A conclusão executiva do ADR (custo não é fator limitante da decisão arquitetural) permanece válida mesmo com os números corrigidos. **Com isso, a Fase 4 do roadmap está concluída.**
+
+## Adendo (2026-11-14) — correção da leitura "thinking domina o custo"
+
+Para o Anthropic, a frase da §5 não se sustenta. Decomposição do custo médio (1.285 entrada, 465 saída, dos quais 184 de *thinking*; US$ 2/10 por MTok; R$ 5,20):
+
+| Parcela | R$/questão | Participação |
+|---|---|---|
+| Entrada (texto + imagem) | 0,0134 | ~36% |
+| Saída visível (transcrição + parecer) | 0,0146 | ~39% |
+| *Thinking* | 0,0096 | ~25% |
+| **Total** | **0,0375** | |
+
+A **saída como um todo** é ~2/3 do custo. Da diferença para a estimativa de R$ 0,0116 (R$ 0,0259), o *thinking* explica ~37%; o restante vem da saída visível maior (a transcrição passou a fazer parte da resposta) e do custo da imagem. O *thinking* explica, sim, a variação entre domínios (AED 24 → MD 299 tokens). Para o Gemini (870/870 quase só *thinking*), a leitura original continua válida.
+
