@@ -240,9 +240,9 @@ class Utils:
 					elif objs[obj]['/Filter'] == '/FlateDecode':
 						size = (objs[obj]['/Width'],objs[obj]['/Height'])
 						mode = "RGB" if objs[obj]['/ColorSpace'] == '/DeviceRGB' else "P"
-						img = Image.frombytes(mode, size, objs[obj].getData())
+						img = Image.frombytes(mode, size, objs[obj].get_data())
 						yield ImageUtils.pil2opencv(img)
-					elif type(objs[obj]['/Filter']) is PyPDF2.generic.ArrayObject:
+					elif type(objs[obj]['/Filter']) is pypdf.generic.ArrayObject:
 						for f in objs[obj]['/Filter']:
 							if f == '/DCTDecode':
 								yield cv2.imdecode(np.frombuffer(objs[obj]._data, np.uint8), cv2.IMREAD_COLOR)
@@ -255,8 +255,12 @@ class Utils:
 	def getEncodeFile(filename):
 		import chardet
 		with open(filename, 'rb') as file:
-			raw = file.read(32)
-		return chardet.detect(raw)['encoding']
+			raw = file.read()
+		try:
+			raw.decode('utf-8')
+			return 'utf-8'
+		except UnicodeDecodeError:
+			return chardet.detect(raw)['encoding']
 
 	@staticmethod
 	def getTimestamp(number_only = False):
@@ -323,40 +327,77 @@ class ImageUtils:
 	def findAnswerAreas(img, verbose=False):
 		import numpy as np
 
-		# Find all bars (header or footer of an answer area)
-		bars = []
-		markers = [m for m in ImageUtils.markerDetector(img)]
-		for i1 in range(len(markers)):
-			c1, r1 = markers[i1] 
-			if verbose:
-				cv2.circle(img, (int(c1[0]),int(c1[1])), int(r1),(0,0,255), thickness=cv2.FILLED)
-			for i2 in range(i1+1,len(markers)):
-				c2,r2 = markers[i2] 
-				p1, p2 = ImageUtils.findPointsPerpendicularToTheLine(c1, c2, r1)
-				p3, p4 = ImageUtils.findPointsPerpendicularToTheLine(c2, c1, r2)
-				box = np.array([p1, p2, p3, p4], dtype=np.int64)
-				warp = ImageUtils.warpImage(img, box)
-				for p,d,t in ImageUtils.barcodeDecoder(warp):
-					if len(d) > 6: # Todo: check if it is a valid code!
-						if verbose:
-							cv2.drawContours(img,[box],0,(0,0,255),2)
-						bars.append([i1, i2, d])
+		# Detecção/decodificação sempre leem desta cópia limpa: o feedback
+		# visual do verbose pinta círculos/contornos em img, e um candidato
+		# falso pintado em cima do barcode corrompia a decodificação (visto
+		# com scans reais; em imagens sintéticas os únicos candidatos são os
+		# 4 alvos verdadeiros e o problema nunca aparecia).
+		clean = img.copy() if verbose else img
 
-		# Find all sections (headers and footers bars of a same answer area)
-		sections = []
-		for i1 in range(len(bars)):
-			_, _, d1 = bars[i1]; d1 = d1.decode('utf-8')
-			for i2 in range(i1+1, len(bars)):
-				_, _, d2 = bars[i2]; d2 = d2.decode('utf-8')
-				if ( (d1[0] == ImageUtils.IMAGE_UP_CODE   and d2[0] == ImageUtils.IMAGE_DOWN_CODE) or
-				     (d1[0] == ImageUtils.IMAGE_DOWN_CODE and d2[0] == ImageUtils.IMAGE_UP_CODE  ) ) and d1[1:] == d2[1:]:
-					if d1[0] == ImageUtils.IMAGE_UP_CODE:
-						sections.append([bars[i1], bars[i2], str(d1[1:])])
-					else:
-						sections.append([bars[i2], bars[i1], str(d1[1:])])
+		# Dois passes de detecção de marcadores: o original (documentos
+		# digitais/rasterizados, anéis nítidos -> hierarquia profunda) e, se
+		# nada for encontrado, um modo tolerante para scans/fotos reais, onde
+		# o borrão do scanner funde os anéis do alvo e quebra o aninhamento
+		# (validado com provas reais escaneadas/fotografadas). Os
+		# falsos positivos extras do modo tolerante são inofensivos: um par de
+		# marcadores só vira seção se houver barcode válido entre eles.
+		for minHierarchy, smallArea in ((7, False), (5, True)):
+			markers = [m for m in ImageUtils.markerDetector(clean, minHierarchy=minHierarchy, smallArea=smallArea)]
+
+			# Funde marcadores duplicados (mesmo alvo detectado em níveis de
+			# contorno diferentes gera centros praticamente idênticos).
+			merged = []
+			for c, r in markers:
+				if not any((c[0]-c2[0])**2 + (c[1]-c2[1])**2 <= (max(r, r2)*0.5)**2 for c2, r2 in merged):
+					merged.append((c, r))
+			markers = merged
+
+			# Find all bars (header or footer of an answer area)
+			bars = []
+			for i1 in range(len(markers)):
+				c1, r1 = markers[i1]
+				if verbose:
+					cv2.circle(img, (int(c1[0]),int(c1[1])), int(r1),(0,0,255), thickness=cv2.FILLED)
+				for i2 in range(i1+1,len(markers)):
+					c2,r2 = markers[i2]
+					if np.hypot(c2[0]-c1[0], c2[1]-c1[1]) <= r1 + r2:
+						continue # Degenerado (quase concêntricos): não há barra entre eles
+					p1, p2 = ImageUtils.findPointsPerpendicularToTheLine(c1, c2, r1)
+					p3, p4 = ImageUtils.findPointsPerpendicularToTheLine(c2, c1, r2)
+					box = np.array([p1, p2, p3, p4], dtype=np.int64)
+					warp = ImageUtils.warpImage(clean, box)
+					for p,d,t in ImageUtils.barcodeDecoder(warp):
+						if len(d) > 6: # Todo: check if it is a valid code!
+							if verbose:
+								cv2.drawContours(img,[box],0,(0,0,255),2)
+							bars.append([i1, i2, d])
+
+			# Find all sections (headers and footers bars of a same answer area)
+			sections = []
+			for i1 in range(len(bars)):
+				_, _, d1 = bars[i1]; d1 = d1.decode('utf-8')
+				for i2 in range(i1+1, len(bars)):
+					_, _, d2 = bars[i2]; d2 = d2.decode('utf-8')
+					if ( (d1[0] == ImageUtils.IMAGE_UP_CODE   and d2[0] == ImageUtils.IMAGE_DOWN_CODE) or
+					     (d1[0] == ImageUtils.IMAGE_DOWN_CODE and d2[0] == ImageUtils.IMAGE_UP_CODE  ) ) and d1[1:] == d2[1:]:
+						if d1[0] == ImageUtils.IMAGE_UP_CODE:
+							sections.append([bars[i1], bars[i2], str(d1[1:])])
+						else:
+							sections.append([bars[i2], bars[i1], str(d1[1:])])
+
+			if sections:
+				break
+
+		# Cada área é corrigida (e, na dissertativa, avaliada via LLM) uma
+		# única vez: descarta seções repetidas do mesmo código, que aparecem
+		# quando marcadores extras pareiam com o mesmo barcode.
+		seen_codes = set()
 
 		# Find answer area
 		for topBar, bottomBar, code in sections:
+			if code in seen_codes:
+				continue
+			seen_codes.add(code)
 			tl = markers[topBar[0]][0];    tlr = markers[topBar[0]][1]
 			tr = markers[topBar[1]][0];    trr = markers[topBar[1]][1]
 			bl = markers[bottomBar[0]][0]; blr = markers[bottomBar[0]][1]
@@ -384,7 +425,7 @@ class ImageUtils:
 			bl = ImageUtils.findPointAlongTheLine(bl, br, -blr   ); br = ImageUtils.findPointAlongTheLine(br, bl, -brr   )
 
 			# Get answer area
-			ansArea = ImageUtils.warpImage(img, (tl,tr,br,bl))
+			ansArea = ImageUtils.warpImage(clean, (tl,tr,br,bl))
 			if verbose:
 				cv2.drawContours(img, [np.array([tl,tr,br,bl], dtype=np.int64)],0,(0,255,255), thickness=2)
 
@@ -1378,6 +1419,121 @@ class QuestionOCR(Question):
 
 
 
+#############################
+# BEGIN QUESTION DISSERTATIVE #
+class QuestionDissertative(Question):
+	# Geometria calibrada para ~8mm entre linhas (pauta de caderno normal) em
+	# A4 com margem de 1in e imagem a 0.9\textwidth: lines=6 + aspectrate=2/1
+	# -> ~8.2mm/linha, espaço confortável para escrita à mão. Subclasses podem
+	# aumentar `lines` e/ou sobrescrever answerAreaAspectRate() para respostas
+	# mais longas (ex.: contas, tabelas).
+	lines      = 6  # quantidade de linhas pautadas na área de resposta
+
+	# Aviso opcional impresso abaixo do enunciado (ex.: pedir letra legível).
+	# Desligado por padrão: com LLM Vision a nota não depende do estilo de
+	# escrita (cursiva e letra de forma tiveram erro de nota equivalente na
+	# validação — ver docs/ADR-001). Defina uma string na subclasse p/ usar.
+	handwriting_notice = None
+
+	statement = None
+	rubric    = None
+
+	def makeSetup(self):
+		raise Exception("Method not implemented.")
+
+	def makeVariables(self):
+		self.makeSetup()
+
+	def answerAreaAspectRate(self):
+		return 2/1
+
+	def drawAnswerArea(self, img):
+		height, width, _ = img.shape
+		cv2.rectangle(img, (0,0), (width-1,height-1), (0,0,0), thickness=2, lineType=cv2.LINE_AA)
+		margin = int(height*0.1)
+		usable_height = height - 2*margin
+		for l in range(1, self.lines+1):
+			y = margin + int(usable_height*l/(self.lines+1))
+			cv2.line(img, (margin, y), (width-margin, y), (0,0,0), thickness=1, lineType=cv2.LINE_AA)
+		return img
+
+	def doCorrection(self, img):
+		# Correção assistida por LLM multimodal (ver docs/ADR-001): o recorte
+		# da área de resposta vai direto para o modelo, que transcreve e avalia
+		# pela rubrica no mesmo passo. O provedor é escolhido por LLM_PROVIDER
+		# (.env; default "mock", sem rede/credencial). O score de confiança não
+		# altera a nota sugerida, só decide se a resposta deve ir para revisão
+		# humana. Tudo fica em self.last_assist, que Main.doCorrection persiste
+		# num sidecar JSON por aluno/questão (consumido por review_hitl.py).
+		import datetime
+		import numpy as np
+		from maketests_ext.image_prep import encode_for_vision
+		from maketests_ext.llm_grader import grade
+		from maketests_ext.llm.schemas import GradingPayload
+
+		image_bytes, image_mime_type = encode_for_vision(img)
+		result = grade(GradingPayload(
+			statement=self.statement, rubric=self.rubric,
+			image_bytes=image_bytes, image_mime_type=image_mime_type,
+		))
+		score = result.suggested_score
+		provider = result.provider_metadata.get("provider", "?")
+		rationale = (result.rationale or result.error or "")[:60]
+		score_line = "Nota sugerida ({}): {} - {}".format(provider, score, rationale)
+
+		confidence = None
+		try:
+			from maketests_ext.confidence_score import ConfidenceSignals, compute as compute_confidence
+			confidence = compute_confidence(ConfidenceSignals(
+				llm_review_recommended=result.review_recommended,
+				llm_error=result.error,
+				rubric_coverage=result.rubric_coverage,
+				used_fallback=result.provider_metadata.get("used_fallback", False),
+			))
+			confidence_line = "Confianca: {} ({}) - revisar: {}".format(
+				confidence.level, confidence.score, "sim" if confidence.review_recommended else "nao")
+		except Exception as e:
+			confidence_line = "Confianca indisponivel: {}".format(e)
+
+		self.last_assist = {
+			"transcription": result.transcription,
+			"suggested_score": result.suggested_score,
+			"rationale": result.rationale,
+			"rubric_coverage": result.rubric_coverage,
+			# Opinião crua do LLM; a decisão final de encaminhamento à revisão
+			# humana (score < limiar OU pedido do LLM) é confidence_review_recommended.
+			"review_recommended": result.review_recommended,
+			"error": result.error,
+			"provider_metadata": result.provider_metadata,
+			"confidence_score": confidence.score if confidence else None,
+			"confidence_level": confidence.level if confidence else None,
+			"confidence_reasons": confidence.reasons if confidence else [],
+			"confidence_review_recommended": confidence.review_recommended if confidence else True,
+			"inference_timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+		}
+
+		imgInfo = np.zeros((120, img.shape[1], 3), np.uint8)
+		imgInfo[:,:] = (255,255,255)
+		ImageUtils.drawTextInsideTheBox(imgInfo[0:40,:], "Transcricao (LLM): {}".format(result.transcription or ""))
+		ImageUtils.drawTextInsideTheBox(imgInfo[40:80,:], score_line)
+		ImageUtils.drawTextInsideTheBox(imgInfo[80:120,:], confidence_line)
+		feedback = np.vstack((imgInfo, img))
+
+		return score, img, feedback
+
+	def getQuestionTex(self, desc):
+		tex = self.statement
+		if self.handwriting_notice:
+			tex += "\n\n\\textit{\\small " + self.handwriting_notice + "}"
+		return tex
+
+	def getAnswerText(self, LaTeX=True):
+		return "Rubrica: " + self.rubric
+# END QUESTION DISSERTATIVE #
+##############################
+
+
+
 #####################
 # BEGIN QUESTIONSDB #
 class QuestionsDB:
@@ -1579,7 +1735,16 @@ class CorrectionManager:
 					ret[f] = line_dict[f]
 					changed = True
 			if student[f] is not None and student[f] != '':
-				all_questions.append(student[f])
+				# Pontuacoes recarregadas de um CSV existente (load()) chegam como
+				# str; pontuacoes recem-atualizadas na mesma execucao chegam como
+				# int/float. Sem normalizar aqui, final_calc mistura tipos (ex.:
+				# "100"*peso vira repeticao de string) e sum() quebra com
+				# TypeError (caso de review_hitl.py, que sempre parte de um
+				# CorrectionManager recem-carregado do CSV).
+				try:
+					all_questions.append(float(student[f]))
+				except (TypeError, ValueError):
+					all_questions.append(student[f])
 
 		# Calculate/recalculate final score (if necessary or possible)
 		if len(all_questions)==self.num_quest and (changed or student[self.headerLabels['final']] is None or student[self.headerLabels['final']] == ''):
@@ -2001,6 +2166,32 @@ class Main:
 
 			# Update the score of current question
 			updated_score, all_scores = self.correction.updateScore(student, question_num, score)
+
+			# Persiste o sidecar de assistencia (transcricao, parecer, confianca,
+			# status HITL) para questoes que o produzem (hoje, QuestionDissertative).
+			# Questoes objetivas nao tem last_assist -> nenhum sidecar e escrito.
+			if getattr(question, "last_assist", None) is not None:
+				import json, os
+				field_name = self.correction.fieldsname_quest[question_num]
+				_, full_path_student = self.makeDirectoryForAStudent(student)
+				sidecar_path = os.path.join(full_path_student, field_name + "_assist.json")
+				assist = dict(question.last_assist)
+				assist["question"] = field_name
+				assist["student"] = self.correction.getIdentification(student)
+				assist["status_hitl"] = "pendente"
+				assist["manual_score"] = None
+				if os.path.exists(sidecar_path):
+					# Preserva decisao HITL ja tomada entre re-scans (rodar -p de
+					# novo nao deve apagar uma revisao humana ja feita).
+					try:
+						with open(sidecar_path) as f:
+							prev = json.load(f)
+						assist["status_hitl"] = prev.get("status_hitl", "pendente")
+						assist["manual_score"] = prev.get("manual_score")
+					except Exception:
+						pass
+				with open(sidecar_path, "w") as f:
+					json.dump(assist, f, ensure_ascii=False, indent=2)
 
 			# Show correct answer in image
 			if self.verbose > 0 and ansAreaPosProc is not None:
@@ -2502,6 +2693,13 @@ class EssayQuestion(QuestionEssay):
 
 	def getAnswerText(self,LaTeX):
 		return ""
+"""
+, 'dissertative': r"""
+from MakeTests import QuestionDissertative
+class MyQuestionDissertative(QuestionDissertative):
+	def makeSetup(self):
+		self.statement = "Explique, em suas palavras, o que e fotossintese e qual sua importancia para os seres vivos."
+		self.rubric    = "Deve citar: (1) conversao de luz solar em energia quimica; (2) papel da clorofila/cloroplastos; (3) liberacao de oxigenio como subproduto."
 """
 , 'choices': r"""
 from MakeTests import QuestionMultipleChoice

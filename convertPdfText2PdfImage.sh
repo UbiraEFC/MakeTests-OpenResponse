@@ -18,8 +18,12 @@ PDF_FILE_OUTPUT="$filename"
 mkdir temp
 cp ${PDF_FILE_INPUT} temp
 cd temp
+# Densidade 300 (era 150): melhora o downsample da area de resposta antes
+# dela ser normalizada para IMAGE_WIDTH=1024px em findAnswerAreas()
+# (MakeTests.py) - o ganho e real mas limitado por esse teto; nao adianta
+# subir a densidade sem tambem subir IMAGE_WIDTH se quiser mais detalhe bruto.
 echo "Step 1/2: generating images of each page of '$PDF_FILE_INPUT'..."
-convert -density 150 ${PDF_FILE_INPUT} -quality 90 output.jpg
+convert -density 300 ${PDF_FILE_INPUT} -quality 90 output.jpg
 echo "Step 2/2: merging the images into the '$PDF_FILE_OUTPUT'..."
 convert output*.jpg ${PDF_FILE_OUTPUT}
 mv ${PDF_FILE_OUTPUT} ..

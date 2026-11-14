@@ -1,2 +1,11 @@
 
 *.pyc
+__pycache__/
+.env
+.venv/
+
+# Saídas geradas pela prova de exemplo dos testes (regeneradas por tests/validate-maketests.sh)
+tests/prova-exemplo/*.pdf
+tests/prova-exemplo/Correcao/
+tests/prova-exemplo/latex_debug/
+tests/prova-exemplo/gerar_prova_respondida_tmp/

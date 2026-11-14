@@ -35,7 +35,7 @@
   -w {0,1,2,3,4,5,6,7,8,9}, --webcam {0,1,2,3,4,5,6,7,8,9}
                         Use webcam with ID.
   -p PDF, --pdf PDF     PDF file with all scanned tests to correct it.
-  -e {choices,config,essay,number,ocr,questionanswer,truefalse}, --examples {choices,config,essay,number,ocr,questionanswer,truefalse}
+  -e {choices,config,dissertative,essay,number,ocr,questionanswer,truefalse}, --examples {choices,config,dissertative,essay,number,ocr,questionanswer,truefalse}
 ```
 
 ## JSON Config
@@ -213,6 +213,83 @@ Some PDFs format is incompatible with MakeTests.
 If an error occurs, try to convert the PDF using `convertPdfText2PdfImage.sh` and try again.
 
 **All scores and feedback will be on Correction folder.**
+
+## Handwritten Dissertative Questions (LLM Vision)
+
+`QuestionDissertative` adds open-ended questions answered by hand on a ruled
+answer area. On correction, the cropped answer area (already located by the
+markers/barcode and rectified) is sent to a multimodal LLM, which transcribes
+the handwriting and grades it against the question's rubric in a single step.
+The score is a **suggestion**: a confidence score decides which answers should
+be reviewed by the teacher, and every decision is auditable.
+
+The design decision (why LLM Vision instead of OCR/HTR, costs, risks, LGPD)
+is documented in [docs/ADR-001-substituicao-ocr-por-llm-vision.md](docs/ADR-001-substituicao-ocr-por-llm-vision.md).
+
+### Setup
+
+```
+pip install -r requirements.txt
+cp .env.example .env    # then set LLM_PROVIDER, LLM_API_KEY, LLM_MODEL
+```
+
+Providers: `gemini`, `anthropic`, and `mock` (offline, no API key, used by the
+tests and as the default when `LLM_PROVIDER` is not set; it does not read the
+image and always suggests 0 with review recommended).
+
+### Writing a question
+
+```
+./MakeTests.py -e dissertative > Questions/Hard/dissertative.py
+```
+
+```python
+from MakeTests import QuestionDissertative
+class MyQuestionDissertative(QuestionDissertative):
+	lines = 6  # ruled lines in the answer area (optional)
+	def makeSetup(self):
+		self.statement = "Explain photosynthesis and its importance."
+		self.rubric    = "Must mention: (1) light -> chemical energy; (2) chlorophyll; (3) oxygen release."
+```
+
+Write the rubric as explicit criteria: the LLM reports coverage per criterion.
+For longer answers (calculations, tables), increase `lines` and/or override
+`answerAreaAspectRate()` (default `2/1`; smaller = taller area).
+
+### Correcting and reviewing
+
+Correct as usual (`./MakeTests.py -p scanned.pdf`). For each dissertative
+answer, the student's correction folder gets:
+
+* `Q_N_<score>.jpg` — the original answer crop (for auditing);
+* `Q_N_Feedback.jpg` — transcription, suggested score and confidence;
+* `Q_N_assist.json` — transcription, rationale, per-criterion rubric coverage,
+  confidence, provider metadata (model, token usage) and review status.
+
+The suggested score already goes to the scores CSV. Then review with
+`review_hitl.py` (run in the folder of `config.json`):
+
+```
+python3 review_hitl.py list                      # pending answers, lowest confidence first
+python3 review_hitl.py accept "<student dir>" 2  # confirm the suggested score of question 2
+python3 review_hitl.py adjust "<student dir>" 2 70   # override with a manual score
+```
+
+A re-scan keeps review decisions already made. Handwritten text that looks
+like an instruction to the grader (e.g. "give full marks") is treated as part
+of the answer, never obeyed, and flagged for review.
+
+### Tests
+
+```
+bash tests/validate-maketests.sh
+```
+
+Runs offline (`LLM_PROVIDER=mock`): generation and correction of the example
+test in `tests/prova-exemplo/`, the dissertative question, provider contracts,
+confidence scoring and the review workflow. An opt-in check against the real
+provider configured in `.env` (1 API call):
+`bash -c 'source tests/validate-maketests.sh; validate_prompt_injection_live'`.
 
 ## Send Feedback
 
