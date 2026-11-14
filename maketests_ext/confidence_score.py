@@ -32,6 +32,11 @@ class ConfidenceSignals:
     rubric_coverage: dict = field(default_factory=dict)
     used_fallback: bool = False
     score_stability_std: float = None
+    # "ocr" (pipeline legado) ou "vision" (ADR-001). Em modo vision nao existe
+    # etapa de OCR: a ausencia de sinal de OCR nao e incerteza de leitura, entao
+    # as penalidades de OCR nao se aplicam (recalibracao da Fase 5 do roadmap Q3
+    # — antes, toda resposta vision perdia 25 pontos fixos e o teto era 75).
+    modality: str = "ocr"
 
 
 @dataclass
@@ -62,19 +67,20 @@ def compute(signals: ConfidenceSignals) -> ConfidenceResult:
     score = 100
     reasons = []
 
-    if signals.ocr_confidence_mean is None:
-        score -= PENALTY_OCR_CONFIDENCE_UNKNOWN
-        reasons.append("ocr_sem_sinal_de_confianca")
-    else:
-        penalty = (1 - signals.ocr_confidence_mean) * PENALTY_OCR_CONFIDENCE_MAX
-        if penalty > 0:
-            score -= penalty
-            reasons.append("ocr_confianca_baixa")
+    if signals.modality != "vision":
+        if signals.ocr_confidence_mean is None:
+            score -= PENALTY_OCR_CONFIDENCE_UNKNOWN
+            reasons.append("ocr_sem_sinal_de_confianca")
+        else:
+            penalty = (1 - signals.ocr_confidence_mean) * PENALTY_OCR_CONFIDENCE_MAX
+            if penalty > 0:
+                score -= penalty
+                reasons.append("ocr_confianca_baixa")
 
-    doubt_penalty = signals.ocr_char_doubt_ratio * PENALTY_OCR_DOUBT_MAX
-    if doubt_penalty > 0:
-        score -= doubt_penalty
-        reasons.append("ocr_caracteres_duvidosos")
+        doubt_penalty = signals.ocr_char_doubt_ratio * PENALTY_OCR_DOUBT_MAX
+        if doubt_penalty > 0:
+            score -= doubt_penalty
+            reasons.append("ocr_caracteres_duvidosos")
 
     if signals.llm_review_recommended:
         score -= PENALTY_LLM_REVIEW_RECOMMENDED

@@ -4,7 +4,7 @@
 
 | Campo | Valor |
 |---|---|
-| **Status** | Aceito — Fases 1, 2 e 4 do roadmap (§11) implementadas e validadas (2026-09-25 e 2026-09-30, branch `pgc3/dissertativa-fase1`); Fase 3 deliberadamente não realizada (decisão justificada, ver §11). `LLM_VISION_MODE=on` é o caminho de produção default. Fase 5 (capítulo de resultados do TCC) segue pendente. |
+| **Status** | Aceito e implementado — roadmap (§11) concluído: Fases 1, 2, 4 e 5 entregues e validadas (2026-09-25 a 2026-11-14, branch `pgc3/dissertativa-fase1`); Fase 3 deliberadamente não realizada (decisão justificada, ver §11). `LLM_VISION_MODE=on` é o caminho de produção default. |
 | **Data** | 2026-07-15 (decisão original) — validação experimental da Fase 1 em 2026-09-25 |
 | **Contexto do projeto** | MakeTests — extensão para correção assistida de provas dissertativas manuscritas (PGC/TCC) |
 | **Decisores** | Autor do PGC + orientador |
@@ -354,6 +354,8 @@ flowchart TD
 
 Os sinais `confidence_mean`/`char_doubt_ratio` do Tesseract deixam de existir. Substituições candidatas (a definir na Fase 2 do roadmap): autoavaliação estruturada do modelo (campo de confiança no JSON), heurísticas sobre a transcrição (comprimento vs. área escrita, marcadores de ilegibilidade declarada), `review_recommended` do próprio avaliador, e — onde disponível — sinais de log-probabilidade. O contrato do `confidence_score.py` (entrada `ConfidenceSignals`, saída 0–100 + razões) permanece; muda o preenchimento dos sinais.
 
+**Implementado na Fase 5 (2026-11-14):** `ConfidenceSignals.modality="vision"` desliga as penalidades de OCR (antes, a ausência de OCR custava 25 pontos fixos e impunha teto de 75, mandando 56% das respostas ao HITL sem necessidade). No modo vision, o encaminhamento passa a ser decidido de fato pelo `review_recommended` do avaliador (a penalidade de cobertura de rubrica, máx. 20, sozinha não cruza o limiar de 70). Resultado no corpus da Fase 2: HITL de 56% → 11%, recall 1,00 sobre a única revisão necessária. Sinais independentes adicionais (autoavaliação de legibilidade, estabilidade entre execuções) seguem como candidatos — ver `RESULTADOS-TESTE-FASE5.md` §3 e §7.
+
 ---
 
 ## 9. Análise de risco
@@ -401,7 +403,7 @@ Plano incremental, cada fase com critério de saída mensurável. O corpus de re
 | **2. Testes comparativos controlados** | ✅ Concluída (2026-09-30) — CER 6,4–8,2% (≤10%), zero alucinações não sinalizadas, correlação nota humana×modelo 0,943 (N=18, 2 escritores) | Corpus rotulado (transcrição ground-truth + nota humana por rubrica) | Medir CER da transcrição do LMM nas provas reais; medir taxa de alucinação em casos com rasura/ruído; recalibrar `confidence_score` com os novos sinais (item aberto, não bloqueante) | ✅ CER da transcrição vision ≤10% no corpus real; zero alucinações não sinalizadas pela confiança — ver `RESULTADOS-TESTE-CORPUS-FASE2.md` §7 |
 | **3. Comparativo OCR × HTR × Vision** | ⏭️ Não realizada — decisão justificada (2026-09-30, ver nota abaixo) | Extensão do `experiments/ocr_styles_eval.py` para 3 braços | Tesseract (baseline histórica), TrOCR base (esforço mínimo, sem fine-tuning — documentar limitação PT), LLM Vision; mesmas imagens, mesmas métricas (CER/WER + nota final vs humana) | Tabela comparativa completa para o TCC; decisão de modelo de produção baseada em dados |
 | **4. Custo real medido** | ✅ Concluída (2026-09-30) — custo real/questão: R$0,0375 (Anthropic, vision) / R$0,0118 (Gemini, texto legado); preços oficiais revalidados | Relatório de custo por questão/turma a partir de `provider_metadata.usage` | Medir thinking tokens reais e custo por questão a partir dos 22 sidecars já existentes; validar os preços oficiais. Ativação real de cache/batch com medição de hit rate fica como item aberto, não bloqueante (nenhuma das 18 chamadas reais usou cache) | ✅ Custo medido por questão com dado real (não simulado); premissas do §6 confirmadas (Gemini) ou corrigidas (Anthropic, ~3x acima da estimativa intro) — ver `RESULTADOS-TESTE-CUSTO-FASE4.md` |
-| **5. Resultados estatísticos** | Pendente | Capítulo de resultados do TCC | Concordância nota-modelo × nota-humana (correlação/kappa ponderado), distribuição de erro por estilo de escrita, taxa de encaminhamento ao HITL antes/depois da migração | Redução mensurável e estatisticamente descrita do volume de HITL vs Q2 (baseline: 100%) |
+| **5. Resultados estatísticos** | ✅ Concluída (2026-11-14) — HITL 100% (Q2) → 11% (vision recalibrado), recall 1,00; Pearson 0,943, kappa ponderado 0,879, MAE 4,8 pts (N=18) — ver `RESULTADOS-TESTE-FASE5.md` | Capítulo de resultados do TCC | Concordância nota-modelo × nota-humana (correlação/kappa ponderado), distribuição de erro por estilo de escrita, taxa de encaminhamento ao HITL antes/depois da migração | Redução mensurável e estatisticamente descrita do volume de HITL vs Q2 (baseline: 100%) |
 
 Dependências transversais: conta paga do(s) fornecedor(es) desde a Fase 1 (o free tier de 20 req/dia inviabiliza até o desenvolvimento); revisão LGPD (§9) antes de usar respostas de terceiros no corpus; atualização do `GUIA-TESTE-AO-VIVO.md` quando o caminho vision virar padrão.
 

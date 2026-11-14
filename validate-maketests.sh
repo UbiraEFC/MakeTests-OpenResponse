@@ -501,6 +501,20 @@ r3 = compute(ConfidenceSignals(ocr_confidence_mean=0.99, ocr_char_doubt_ratio=0.
                                 llm_review_recommended=True, rubric_coverage={"a": True}))
 print("T5.3", "OK" if r3.review_recommended is True else "FAIL {}".format(r3))
 
+# T5.6 - recalibracao vision: sem OCR nao ha penalidade de OCR (teto deixa de ser 75)
+r6 = compute(ConfidenceSignals(modality="vision", llm_review_recommended=False,
+                                rubric_coverage={"a": True, "b": True}))
+ok6 = r6.score == 100 and r6.level == "alta" and not r6.review_recommended \
+    and not any(x.startswith("ocr_") for x in r6.reasons)
+print("T5.6", "OK" if ok6 else "FAIL {}".format(r6))
+
+# T5.7 - recalibracao vision preserva o pedido do LLM e o legado continua penalizando
+r7 = compute(ConfidenceSignals(modality="vision", llm_review_recommended=True,
+                                rubric_coverage={"a": True}))
+r7_legacy = compute(ConfidenceSignals(llm_review_recommended=False, rubric_coverage={"a": True}))
+ok7 = r7.review_recommended and "ocr_sem_sinal_de_confianca" in r7_legacy.reasons
+print("T5.7", "OK" if ok7 else "FAIL {} / {}".format(r7, r7_legacy))
+
 # T5.5 - integracao com QuestionDissertative.doCorrection (LLM_PROVIDER=mock)
 class T(QuestionDissertative):
     def makeSetup(self):
@@ -528,6 +542,8 @@ PYEOF
     grep -q "^T5.1 OK" /tmp/validate_fase5_unit.log; check "T5.1" "OCR ruim + LLM inseguro -> confiança baixa" $?
     grep -q "^T5.2 OK" /tmp/validate_fase5_unit.log; check "T5.2" "OCR bom + LLM confiante -> confiança alta" $?
     grep -q "^T5.3 OK" /tmp/validate_fase5_unit.log; check "T5.3" "Divergência: LLM pede revisão -> review_recommended sempre true" $?
+    grep -q "^T5.6 OK" /tmp/validate_fase5_unit.log; check "T5.6" "Vision: sem penalidade de OCR inexistente (recalibração)" $?
+    grep -q "^T5.7 OK" /tmp/validate_fase5_unit.log; check "T5.7" "Vision preserva pedido do LLM; legado segue penalizando" $?
     skip "T5.4" "Estabilidade entre execuções não implementada (hook reservado em score_stability_std, ver confidence_score.py)"
     grep -q "^T5.5 OK" /tmp/validate_fase5_unit.log; check "T5.5" "doCorrection inclui linha de confiança no feedback" $?
 }

@@ -1527,6 +1527,7 @@ class QuestionDissertative(Question):
 				llm_error=result.error,
 				rubric_coverage=result.rubric_coverage,
 				used_fallback=result.provider_metadata.get("used_fallback", False),
+				modality="vision" if vision_mode else "ocr",
 			))
 			confidence_line = "Confianca: {} ({}) - revisar: {}".format(
 				confidence.level, confidence.score, "sim" if confidence.review_recommended else "nao")
@@ -1549,6 +1550,9 @@ class QuestionDissertative(Question):
 				"confidence_score": confidence.score if confidence else None,
 				"confidence_level": confidence.level if confidence else None,
 				"confidence_reasons": confidence.reasons if confidence else [],
+				# Decisao final de encaminhamento ao HITL (score < limiar OU pedido
+				# do LLM). "review_recommended" acima e so a opiniao crua do LLM.
+				"confidence_review_recommended": confidence.review_recommended if confidence else True,
 				"inference_timestamp": datetime.datetime.utcnow().isoformat() + "Z",
 			}
 		except Exception:
